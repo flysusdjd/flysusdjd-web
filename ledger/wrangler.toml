@@ -1,0 +1,24 @@
+# 家庭记账本 · Cloudflare 部署配置 / deploy config
+#
+# 用法 / usage:
+#   cd ledger
+#   npx wrangler d1 create family-ledger     # 建库，把 database_id 填到下面
+#   npx wrangler d1 execute family-ledger --file=worker/schema.sql --remote
+#   npx wrangler secret put AUTH_PEPPER      # 服务器端 pepper，别写进这个文件
+#   npx wrangler deploy
+
+name = "family-ledger"
+main = "worker/index.js"
+compatibility_date = "2026-01-01"
+
+# 前端静态文件：同一个 Worker 一起发布 / static assets ship with the worker
+[assets]
+directory = "./web"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+
+# D1 数据库绑定，代码里通过 env.DB 访问
+[[d1_databases]]
+binding = "DB"
+database_name = "family-ledger"
+database_id = "PUT-YOUR-DATABASE-ID-HERE"

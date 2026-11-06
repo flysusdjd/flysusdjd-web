@@ -1,0 +1,8 @@
+preview/
+deploy.zip
+*.zip
+.tools/
+.npmcache/
+node_modules/
+.dev.db
+.dev.db-*
