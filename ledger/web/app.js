@@ -116,7 +116,14 @@ async function sha256Hex(text) {
 }
 
 /** 密码不出浏览器：600k 次 PBKDF2，只把拉伸结果发出去 */
+const HAS_SUBTLE = typeof crypto !== 'undefined' && !!crypto.subtle;
+
 async function deriveAuthHash(username, password) {
+  if (!HAS_SUBTLE) {
+    const err = new Error('这个地址不能用。请用 https:// 开头的网址打开（手机用局域网 IP 是 http，浏览器会禁用密码加密）。');
+    err.code = 'insecure';
+    throw err;
+  }
   const saltHex = (await sha256Hex(`ledger:v1:${username.toLowerCase()}`)).slice(0, 32);
   const salt = new Uint8Array(saltHex.match(/.{2}/g).map((h) => parseInt(h, 16)));
   const baseKey = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, [
@@ -163,10 +170,20 @@ async function api(method, path, body) {
   };
   if (body !== undefined) init.body = JSON.stringify(body);
 
+  const ctrl = new AbortController();
+  init.signal = ctrl.signal;
+  const timer = setTimeout(() => ctrl.abort(), 12000);
+
   let res;
   try {
     res = await fetch(path, init);
   } catch (err) {
+    clearTimeout(timer);
+    if (err && err.name === 'AbortError') {
+      const t = new Error('网有点慢，没连上。检查一下网络，再试一次。');
+      t.code = 'timeout';
+      throw t;
+    }
     // 断网：GET 用缓存顶上，别把人踢回登录页
     if (method === 'GET') {
       const cached = localStorage.getItem(`cache:${path}`);
@@ -174,6 +191,7 @@ async function api(method, path, body) {
     }
     throw err;
   }
+  clearTimeout(timer);
 
   let data = {};
   try {
@@ -187,7 +205,11 @@ async function api(method, path, body) {
       onUnauthorized();
       throw new Error('未登录');
     }
-    const err = new Error(data.message || `请求失败 (${res.status})`);
+    let msg = data.message || `请求失败 (${res.status})`;
+    if (res.status === 401 && path.startsWith('/api/auth')) msg = '用户名或密码不对，密码区分大小写。';
+    else if (res.status === 409 && path.includes('/auth/register')) msg = '这个用户名已经有人用了，换一个。';
+    else if (res.status >= 500) msg = `服务没响应（${res.status}），过一会儿再试。`;
+    const err = new Error(msg);
     err.status = res.status;
     err.data = data;
     throw err;
@@ -224,7 +246,8 @@ const state = {
   listError: '',
   filters: { keyword: '', direction: 'all', category: 'all' },
   draft: {
-    cents: 0,
+    yuan: '',
+    dec: null,
     direction: 'expense',
     categoryId: null,
     note: '',
@@ -283,6 +306,26 @@ function openModal(html) {
   if (focusable) setTimeout(() => focusable.focus(), 30);
 }
 
+/** 整块替换弹层内容（调用方自己带 .modal__card） */
+function showModal(html) {
+  const modal = $('#modal');
+  modal.innerHTML = html;
+  modal.hidden = false;
+  modal.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('click', closeModal));
+  const first = modal.querySelector('input, select, button');
+  if (first) setTimeout(() => first.focus(), 30);
+}
+
+/** 清掉指定路径的 GET 缓存，改完资料/换账本后必须调 */
+function invalidateCache(paths) {
+  for (const k of Object.keys(localStorage)) {
+    if (!k.startsWith('cache:')) continue;
+    if (!paths || paths.some((p) => k === `cache:${p}` || k.startsWith(`cache:${p}?`))) {
+      localStorage.removeItem(k);
+    }
+  }
+}
+
 function closeModal() {
   const modal = $('#modal');
   modal.hidden = true;
@@ -331,6 +374,12 @@ function showAuthError(msg) {
   const box = $('#authError');
   box.textContent = msg;
   box.hidden = false;
+  // 手机上键盘弹起时错误框常在可视区外，必须拉回来
+  try {
+    box.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  } catch {
+    /* 老浏览器忽略 */
+  }
 }
 
 function authValidity() {
@@ -401,6 +450,7 @@ $('#authForm').addEventListener('submit', async (e) => {
 
   const btn = $('#authSubmit');
   const label = $('#authSubmitText');
+  if ($('#authError')) $('#authError').hidden = true;
   const original = label.textContent;
   btn.classList.add('is-loading');
   btn.disabled = true;
@@ -421,7 +471,9 @@ $('#authForm').addEventListener('submit', async (e) => {
     await boot();
   } catch (err) {
     const status = err.status;
-    if (status === 401) showAuthError('用户名或密码不对，再试一次');
+    if (err.code === 'insecure') showAuthError(err.message);
+    else if (err.code === 'timeout') showAuthError(err.message);
+    else if (status === 401) showAuthError('用户名或密码不对，再试一次');
     else if (status === 409) showAuthError('这个用户名已经有人用了，换一个');
     else if (looksOffline(err)) showAuthError('网络不通，连上再试');
     else showAuthError(err.message || '出了点问题，再试一次');
@@ -456,11 +508,41 @@ async function boot() {
   }
 }
 
+/* ------------------------------------------------------------ 头像 */
+
+const AVATAR_EMOJI_MAP = {
+  cat: '🐱',
+  dog: '🐶',
+  fox: '🦊',
+  bear: '🐻',
+  rabbit: '🐰',
+  panda: '🐼',
+  fish: '🐟',
+};
+
+/** 把 avatar 值画成一个头像节点（首字母 / 预设 emoji / 上传图片） */
+function avatarNode(value, name, cls = 'avatar', id = '') {
+  const label = escapeAttr((name || '?').slice(0, 1));
+  const idAttr = id ? ` id="${id}"` : '';
+  const v = value || '';
+  if (v.startsWith('data:image/')) {
+    return `<span class="${cls} ${cls}--img"${idAttr}><img src="${v}" alt="" loading="lazy" /></span>`;
+  }
+  if (v.startsWith('emoji:')) {
+    const key = v.slice(6);
+    if (key === 'initial') return `<span class="${cls}"${idAttr}>${label}</span>`;
+    const emo = AVATAR_EMOJI_MAP[key];
+    if (emo) return `<span class="${cls} ${cls}--emoji"${idAttr}>${emo}</span>`;
+  }
+  return `<span class="${cls}"${idAttr}>${label}</span>`;
+}
+
 function paintShell() {
   const name = state.me?.displayName || state.me?.username || '—';
   $('#sideHousehold').textContent = state.me?.householdName || '家庭记账本';
   $('#sideUserName').textContent = name;
-  $('#sideAvatar').textContent = name.slice(0, 1);
+  const sideAv = $('#sideAvatar');
+  if (sideAv) sideAv.outerHTML = avatarNode(state.me?.avatar, name, 'avatar', 'sideAvatar');
   const isOwner = state.me?.role === 'owner';
   $('#sideRole').textContent = isOwner ? '账本创建者' : '家庭成员';
   $('#monthLabel').textContent = fmtRangeCN(state.range);
@@ -521,6 +603,14 @@ function rangeBounds(r) {
   if (r.kind === 'range') return { from: r.from, to: r.to };
   const [y, m] = r.month.split('-').map(Number);
   return { from: `${r.month}-01`, to: `${r.month}-${pad2(new Date(y, m, 0).getDate())}` };
+}
+
+/** 「本月 / 这段时间 / 这一天」，统计文案用 */
+function rangeNameCN() {
+  const k = state.range.kind;
+  if (k === 'month') return '本月';
+  if (k === 'day') return '这一天';
+  return '这段时间';
 }
 
 function queryFor() {
@@ -889,7 +979,8 @@ async function loadEntries() {
   } finally {
     if (seq === entriesSeq) {
       state.entriesLoading = false;
-      if (state.view === 'list' || state.view === 'stats') render();
+      // 首页的「最近记的」也要吃到新数据
+      render();
     }
   }
 }
@@ -942,12 +1033,22 @@ function sumOf(list, direction) {
 function render() {
   const view = $('#view');
   if (!view) return;
-  view.classList.toggle('view--add', state.view === 'add');
-  if (state.view === 'add') view.innerHTML = renderAdd();
-  else if (state.view === 'list') view.innerHTML = renderList();
-  else if (state.view === 'stats') view.innerHTML = renderStats();
-  else view.innerHTML = renderMe();
-  bindView();
+  try {
+    const html = state.view === 'add' ? renderAdd() : state.view === 'list' ? renderList() : state.view === 'stats' ? renderStats() : renderMe();
+    view.classList.toggle('view--add', state.view === 'add');
+    view.innerHTML = html;
+    bindView();
+  } catch (err) {
+    console.error('[render]', err);
+    state.lastRenderError = err;
+    view.innerHTML = `<div class="empty">
+      <span class="empty__icon">${icon('other')}</span>
+      <b>这一页没画出来</b>
+      <span>数据还在，只是渲染出了点问题。点下面重新加载一次。</span>
+      <button type="button" class="btn btn--primary btn--sm" data-reload>重新加载</button>
+    </div>`;
+    $('#view')?.querySelector('[data-reload]')?.addEventListener('click', () => boot());
+  }
 }
 
 /* ---------------------------------------------------------------- 记一笔 */
@@ -955,9 +1056,9 @@ function render() {
 function renderAdd() {
   const d = state.draft;
   const cats = state.categories.filter((c) => c.direction === d.direction);
-  const amount = fmtMoney(d.cents, { symbol: false });
-  const canSave = d.cents > 0 && d.categoryId;
-  const note = !d.cents
+  const cents = draftCents(d);
+  const canSave = cents > 0 && d.categoryId;
+  const note = !cents
     ? '先按上面的数字键输入金额'
     : !d.categoryId
       ? '选一个分类才能保存'
@@ -968,10 +1069,11 @@ function renderAdd() {
       <section class="card compose__left">
         <div class="amount">
           <span class="amount__cur">¥</span>
-          <span class="amount__value ${d.cents ? '' : 'is-zero'}">${amount}</span>
+          <span class="amount__value ${cents ? '' : 'is-zero'}" data-fit="${amountFit()}" aria-live="polite">${draftText(d)}</span>
+          <button type="button" class="amount__clear" id="clearAmount" aria-label="清空金额" ${cents ? '' : 'hidden'}>清空</button>
         </div>
         <div class="keypad">
-          ${['1', '2', '3', '4', '5', '6', '7', '8', '9', '00', '0']
+          ${['1', '2', '3', '4', '5', '6', '7', '8', '9', '.', '0']
             .map((k) => `<button type="button" class="key" data-key="${k}">${k}</button>`)
             .join('')}
           <button type="button" class="key" data-key="del" aria-label="退格">${icon('backspace')}</button>
@@ -1282,9 +1384,9 @@ function renderStats() {
         <div class="sparkbox">
           <div class="spark">${dayBars}</div>
           <div class="spark__axis">
-            <span>1 日</span>
-            <span>本月累计 ${fmtMoney(total.expense)}</span>
-            <span>${daysInMonth} 日</span>
+            <span>${mdCN(dayKeys[0])}</span>
+            <span>${rangeNameCN()}累计 ${fmtMoney(total.expense)}</span>
+            <span>${mdCN(dayKeys[dayKeys.length - 1])}</span>
           </div>
         </div>
 
@@ -1324,7 +1426,7 @@ function renderStats() {
               </div>`
             : ''
         }
-        <p class="trend-note">本月一共 ${memberList.length} 个人记了 ${state.entries.length} 笔账，平均每天 <b>${fmtMoney(Math.round(total.expense / daysInMonth))}</b>。</p>
+        <p class="trend-note">${rangeNameCN()}一共 ${memberList.length} 个人记了 ${state.entries.length} 笔账，平均每天 <b>${fmtMoney(Math.round(total.expense / Math.max(1, dayKeys.length)))}</b>。</p>
       `
     }
   `;
@@ -1340,11 +1442,12 @@ function renderMe() {
   return `
     <div class="panel">
       <div class="profile">
-        <span class="profile__avatar">${escapeAttr(name.slice(0, 1))}</span>
-        <div style="min-width:0">
+        ${avatarNode(me.avatar, name, 'profile__avatar')}
+        <div style="flex:1;min-width:0">
           <div class="profile__name">${escapeAttr(name)}</div>
           <div class="profile__meta">@${escapeAttr(me.username || '')} · ${escapeAttr(me.householdName || '')}</div>
         </div>
+        <button type="button" class="btn btn--ghost btn--sm" data-edit-profile>改资料</button>
       </div>
     </div>
 
@@ -1355,7 +1458,7 @@ function renderMe() {
         ${state.members
           .map(
             (m) => `<div class="memrow">
-              <span class="avatar">${escapeAttr((m.display_name || '?').slice(0, 1))}</span>
+              ${avatarNode(m.avatar, m.display_name, 'avatar')}
               <span style="flex:1;min-width:0">
                 <span class="memrow__name">${escapeAttr(m.display_name)}</span>
                 <span class="memrow__meta">${m.role === 'owner' ? '账本创建者' : '家庭成员'}</span>
@@ -1404,6 +1507,18 @@ function renderMe() {
     </div>
 
     <div class="panel">
+      <div class="panel__title">退出家庭</div>
+      <p class="panel__desc">${
+        state.members.length > 1
+          ? isOwner
+            ? '你是这个账本的创建者。退出会把创建者身份转给最早加入的家人，你的账目会留在原账本里。'
+            : '退出后这个账本里的账你就看不到了。你自己的账会跟着你走。'
+          : '这个账本只有你一个人。退出会给你换一个新的空账本，<b>原来的账目和分类会一起搬过去</b>，不会丢。'
+      }</p>
+      <button type="button" class="btn btn--danger btn--sm" data-leave-household>退出家庭</button>
+    </div>
+
+    <div class="panel">
       <div class="panel__title">账号</div>
       <p class="panel__desc">退出后需要重新输入用户名和密码，账目不会丢。</p>
       <button type="button" class="btn btn--ghost btn--sm" id="logoutBtn">退出登录</button>
@@ -1443,7 +1558,28 @@ function bindView() {
   /* 记一笔 */
   $$('.key', view).forEach((btn) => {
     btn.addEventListener('click', () => pressKey(btn.dataset.key));
+    if (btn.dataset.key === 'del') {
+      // 长按 600ms 直接清空金额
+      let timer = null;
+      const start = () => {
+        timer = setTimeout(() => {
+          timer = null;
+          clearDraftAmount();
+        }, 600);
+      };
+      const stop = () => {
+        if (timer) {
+          clearTimeout(timer);
+          timer = null;
+        }
+      };
+      btn.addEventListener('pointerdown', start);
+      ['pointerup', 'pointerleave', 'pointercancel'].forEach((ev) => btn.addEventListener(ev, stop));
+    }
   });
+
+  const clearBtn = $('#clearAmount', view);
+  if (clearBtn) clearBtn.addEventListener('click', () => clearDraftAmount());
   $$('[data-dir]', view).forEach((btn) => {
     btn.addEventListener('click', () => {
       state.draft.direction = btn.dataset.dir;
@@ -1481,6 +1617,12 @@ function bindView() {
   });
   const saveBtn = $('#saveEntry', view);
   if (saveBtn) saveBtn.addEventListener('click', saveDraft);
+
+  const editProfile = $('[data-edit-profile]', view);
+  if (editProfile) editProfile.addEventListener('click', openProfileEditor);
+
+  const leaveBtn = $('[data-leave-household]', view);
+  if (leaveBtn) leaveBtn.addEventListener('click', openLeaveDialog);
 
   $$('[data-restore]', view).forEach((btn) => {
     btn.addEventListener('click', async () => {
@@ -1593,28 +1735,99 @@ function repaintList() {
   }
 }
 
+/* ------------------------------------------------------------ 金额输入 */
+
+/** 由 yuan/dec 派生「分」。dec === null 表示还没按小数点。 */
+function draftCents(d = state.draft) {
+  const yuan = d.yuan === '' ? '0' : d.yuan;
+  const dec = d.dec === null ? '' : d.dec;
+  const fen = (dec + '00').slice(0, 2);
+  return Number(yuan) * 100 + Number(fen);
+}
+
+/** 输入框里显示的字符串：整数带千分位，小数点按用户按下的样子保留 */
+function draftText(d = state.draft) {
+  const yuan = d.yuan === '' ? '0' : d.yuan;
+  const grouped = yuan.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  if (d.dec === null) return grouped;
+  return `${grouped}.${d.dec}`;
+}
+
+/** 金额字号按长度降级，避免 6 位数撑破卡片 */
+function amountFit() {
+  const len = draftText().length;
+  return len > 10 ? 'sm' : len > 7 ? 'md' : 'lg';
+}
+
+function paintAmount() {
+  const d = state.draft;
+  const val = $('.amount__value');
+  if (!val) return;
+  val.textContent = draftText(d);
+  val.classList.toggle('is-zero', draftCents(d) === 0);
+  val.dataset.fit = amountFit();
+
+  const clear = $('#clearAmount');
+  if (clear) clear.hidden = !(d.yuan || d.dec !== null);
+
+  const dot = $('.key[data-key="."]');
+  if (dot) dot.disabled = d.dec !== null;
+}
+
+function clearDraftAmount() {
+  state.draft.yuan = '';
+  state.draft.dec = null;
+  paintAmount();
+  syncSaveState();
+}
+
+/** 保存按钮与提示行（不置灰，只标 blocked，点了会说原因） */
+function syncSaveState() {
+  const d = state.draft;
+  const cents = draftCents();
+  const note = $('#saveNote');
+  if (note) {
+    note.textContent = !cents
+      ? '先按数字键输入金额'
+      : !d.categoryId
+        ? '选一个分类才能保存'
+        : saveHint();
+    note.classList.remove('is-error');
+  }
+  const btn = $('#saveEntry');
+  if (btn) btn.classList.toggle('is-blocked', !(cents > 0 && d.categoryId));
+}
+
 /* ------------------------------------------------------------ 数字键盘 */
 
 function pressKey(key) {
   const d = state.draft;
+
   if (key === 'del') {
-    d.cents = Math.floor(d.cents / 10);
-  } else if (key === '00') {
-    if (d.cents > 0 && d.cents < 10000000) d.cents = d.cents * 100;
+    if (d.dec !== null) {
+      if (d.dec.length) d.dec = d.dec.slice(0, -1);
+      else d.dec = null; // 再退一次就取消小数点
+    } else {
+      d.yuan = d.yuan.slice(0, -1);
+    }
+  } else if (key === '.') {
+    if (d.dec !== null) return;
+    if (d.yuan === '') d.yuan = '0';
+    d.dec = '';
   } else {
-    if (d.cents >= 10000000) return;
-    d.cents = d.cents * 10 + Number(key);
+    // 数字键
+    if (d.dec !== null) {
+      if (d.dec.length >= 2) return;
+      d.dec += key;
+    } else {
+      if (d.yuan.length >= 6) return; // ¥999,999.99 封顶
+      if (d.yuan === '0') d.yuan = key;
+      else d.yuan += key;
+    }
   }
-  const val = $('.amount__value');
-  const note = $('#saveNote');
-  if (val) {
-    val.textContent = fmtMoney(d.cents, { symbol: false });
-    val.classList.toggle('is-zero', !d.cents);
-  }
-  const canSave = d.cents > 0 && d.categoryId && !state.saving;
-  const btn = $('#saveEntry');
-  if (btn) btn.disabled = !canSave;
-  if (note) note.textContent = !d.cents ? '先按上面的数字键输入金额' : !d.categoryId ? '选一个分类才能保存' : saveHint();
+
+  paintAmount();
+  syncSaveState();
 }
 
 /* -------------------------------------------------------------- 保存一笔 */
@@ -1622,8 +1835,9 @@ function pressKey(key) {
 async function saveDraft() {
   if (state.saving) return;
   const d = state.draft;
-  if (!d.cents) {
-    markSaveError('金额要大于 0，先按上面的数字键');
+  const cents = draftCents();
+  if (!cents) {
+    markSaveError('金额要大于 0，先按数字键输入');
     return;
   }
   if (!d.categoryId) {
@@ -1639,7 +1853,7 @@ async function saveDraft() {
   }
 
   const payload = {
-    amountCents: d.cents,
+    amountCents: cents,
     direction: d.direction,
     categoryId: String(d.categoryId),
     note: d.note.trim(),
@@ -1652,7 +1866,8 @@ async function saveDraft() {
     const entry = data.entry || {};
     const sign = d.direction === 'income' ? '+' : '−';
     const label = `${sign}${fmtMoney(payload.amountCents)}`;
-    state.draft.cents = 0;
+    state.draft.yuan = '';
+    state.draft.dec = null;
     state.draft.note = '';
     state.saving = false;
     state.highlightId = entry.id || null;
@@ -1685,7 +1900,8 @@ async function saveDraft() {
       const queue = readOutbox();
       queue.push(payload);
       writeOutbox(queue);
-      state.draft.cents = 0;
+      state.draft.yuan = '';
+      state.draft.dec = null;
       state.draft.note = '';
       render();
       toast('网络不通，已先存在这台设备上，联网后自动上传');
@@ -1975,6 +2191,203 @@ async function doLogout() {
   showAuth();
 }
 
+/* ------------------------------------------------------------ 改资料 */
+
+const AVATAR_PRESETS = [
+  ['initial', '首字'],
+  ['cat', '🐱'],
+  ['dog', '🐶'],
+  ['fox', '🦊'],
+  ['bear', '🐻'],
+  ['rabbit', '🐰'],
+  ['panda', '🐼'],
+  ['fish', '🐟'],
+];
+
+function openProfileEditor() {
+  const me = state.me || {};
+  const name = me.displayName || me.username || '';
+  const current = me.avatar || 'emoji:initial';
+
+  showModal(`
+    <div class="modal__card" role="dialog" aria-modal="true" aria-labelledby="profileTitle">
+      <h2 class="modal__title" id="profileTitle">改资料</h2>
+      <div class="modal__field">
+        <label class="modal__label" for="profileName">怎么称呼你</label>
+        <input class="input" id="profileName" maxlength="10" value="${escapeAttr(name)}" aria-describedby="profileNameHint" />
+        <span class="field__hint" id="profileNameHint">改完之后，以前的账目署名也会一起变。</span>
+      </div>
+      <div class="modal__field">
+        <span class="modal__label">头像</span>
+        <div class="avatarpick" role="radiogroup" aria-label="选择头像">
+          ${AVATAR_PRESETS.map(([key, glyph]) => {
+            const on = current === `emoji:${key}` || (key === 'initial' && current.startsWith('emoji:initial'));
+            return `<button type="button" class="avatarpick__item${on ? ' is-active' : ''}" data-avatar="emoji:${key}" role="radio" aria-checked="${on}" aria-label="${key === 'initial' ? '用名字首字' : key}">${key === 'initial' ? avatarNode('emoji:initial', name) : glyph}</button>`;
+          }).join('')}
+          <button type="button" class="avatarpick__item avatarpick__upload" data-avatar-upload aria-label="上传图片">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4"/><path d="m7 9 5-5 5 5"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
+          </button>
+        </div>
+        <input type="file" id="avatarFile" accept="image/*" hidden />
+        <p class="modal__meta" id="avatarNote">支持 1MB 以内的图片，会自动裁成方形。</p>
+      </div>
+      <p class="authform__error" id="profileError" role="alert" hidden></p>
+      <div class="modal__actions">
+        <button type="button" class="btn btn--ghost" data-close>取消</button>
+        <button type="button" class="btn btn--primary" id="profileSave">保存</button>
+      </div>
+    </div>
+  `);
+
+  let picked = current;
+  const modal = $('#modal');
+
+  modal.querySelectorAll('[data-avatar]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      picked = btn.dataset.avatar;
+      modal.querySelectorAll('[data-avatar]').forEach((b) => {
+        const on = b === btn;
+        b.classList.toggle('is-active', on);
+        b.setAttribute('aria-checked', String(on));
+      });
+    });
+  });
+
+  modal.querySelector('[data-avatar-upload]').addEventListener('click', () => $('#avatarFile').click());
+
+  $('#avatarFile').addEventListener('change', async (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    const note = $('#avatarNote');
+    try {
+      note.textContent = '正在处理图片…';
+      picked = await compressAvatar(file);
+      note.textContent = '已选好这张，点保存生效。';
+      modal.querySelectorAll('[data-avatar]').forEach((b) => {
+        b.classList.remove('is-active');
+        b.setAttribute('aria-checked', 'false');
+      });
+      modal.querySelector('[data-avatar-upload]').classList.add('is-active');
+    } catch (err) {
+      note.textContent = err.message || '这张图读不了，换一张试试';
+      picked = current;
+    }
+  });
+
+  $('#profileSave').addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    const errBox = $('#profileError');
+    const newName = $('#profileName').value.trim();
+    if (newName.length < 1) {
+      errBox.textContent = '称呼至少填 1 个字';
+      errBox.hidden = false;
+      return;
+    }
+    btn.disabled = true;
+    btn.classList.add('is-loading');
+    try {
+      await api('PATCH', '/api/me', { displayName: newName, avatar: picked });
+      invalidateCache(['/api/me']);
+      state.me = { ...state.me, displayName: newName, avatar: picked };
+      closeModal();
+      paintShell();
+      render();
+      toast('改好了');
+    } catch (err) {
+      errBox.textContent = err.message || '没保存上，再试一次';
+      errBox.hidden = false;
+      btn.disabled = false;
+      btn.classList.remove('is-loading');
+    }
+  });
+}
+
+/** 裁成 160×160 webp，压到 24KB 以内 */
+function compressAvatar(file) {
+  return new Promise((resolve, reject) => {
+    if (file.size > 8 * 1024 * 1024) return reject(new Error('图片太大了，换一张 8MB 以内的'));
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      const side = Math.min(img.width, img.height);
+      const sx = (img.width - side) / 2;
+      const sy = (img.height - side) / 2;
+      const size = 160;
+      const canvas = document.createElement('canvas');
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, sx, sy, side, side, 0, 0, size, size);
+      URL.revokeObjectURL(url);
+      for (const q of [0.85, 0.7, 0.6, 0.5]) {
+        const data = canvas.toDataURL('image/webp', q);
+        if (data.length <= 24000 || q === 0.5) return resolve(data);
+      }
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('这张图格式不支持'));
+    };
+    img.src = url;
+  });
+}
+
+/* ------------------------------------------------------------ 退出家庭 */
+
+function openLeaveDialog() {
+  const me = state.me || {};
+  const isOwner = me.role === 'owner';
+  const multi = state.members.length > 1;
+
+  const title = multi ? '退出这个账本？' : '换一个新账本？';
+  const body = multi
+    ? isOwner
+      ? '你是创建者。退出后创建者会转给最早加入的家人，你的账目留在原账本，你之后看不到这些账。'
+      : '退出后你就看不到这个账本里的账目了。你自己的账会跟着你走。'
+    : '这个账本只有你一个人。换新账本时，你的账目和分类会一起搬过去，不会丢。';
+
+  showModal(`
+    <div class="modal__card" role="dialog" aria-modal="true" aria-labelledby="leaveTitle">
+      <h2 class="modal__title" id="leaveTitle">${title}</h2>
+      <p class="modal__note">${body}</p>
+      <label class="checkrow">
+        <input type="checkbox" id="leaveConfirm" />
+        <span>我知道退出后就看不到原来那本账了</span>
+      </label>
+      <div class="modal__actions">
+        <button type="button" class="btn btn--ghost" data-close id="leaveCancel">再想想</button>
+        <button type="button" class="btn btn--danger" id="leaveDo" disabled>确认退出</button>
+      </div>
+    </div>
+  `);
+
+  const check = $('#leaveConfirm');
+  const doBtn = $('#leaveDo');
+  check.addEventListener('change', () => {
+    doBtn.disabled = !check.checked;
+  });
+
+  doBtn.addEventListener('click', async () => {
+    doBtn.disabled = true;
+    doBtn.classList.add('is-loading');
+    try {
+      await api('POST', '/api/household/leave', { confirm: true });
+      invalidateCache(['/api/me', '/api/categories', '/api/entries', '/api/stats']);
+      state.draft.categoryId = null;
+      state.bin = [];
+      closeModal();
+      toast('已退出，换到新账本了');
+      await boot();
+    } catch (err) {
+      doBtn.disabled = false;
+      doBtn.classList.remove('is-loading');
+      toast(err.message || '退出失败');
+    }
+  });
+
+  setTimeout(() => $('#leaveCancel')?.focus(), 30);
+}
+
 /* ------------------------------------------------------------ 实体键盘 */
 
 document.addEventListener('keydown', (e) => {
@@ -1986,9 +2399,17 @@ document.addEventListener('keydown', (e) => {
   if (/^[0-9]$/.test(e.key) && !typing) {
     pressKey(e.key);
     e.preventDefault();
+  } else if ((e.key === '.' || e.key === ',') && !typing) {
+    pressKey('.');
+    e.preventDefault();
   } else if (e.key === 'Backspace' && !typing) {
     pressKey('del');
     e.preventDefault();
+  } else if (e.key === 'Delete' && !typing) {
+    clearDraftAmount();
+    e.preventDefault();
+  } else if (e.key === 'Escape' && !typing && !$('#modal')?.hidden === false) {
+    // 有弹层时先关弹层（由弹层自己的 Esc 处理）
   } else if (e.key === 'Enter' && !typing) {
     const btn = $('#saveEntry');
     if (btn && !btn.disabled) saveDraft();

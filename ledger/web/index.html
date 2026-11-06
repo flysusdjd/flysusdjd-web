@@ -100,8 +100,9 @@
                     <circle cx="12" cy="8.5" r="3.6" />
                     <path d="M5 20c.8-3.6 3.6-5.6 7-5.6s6.2 2 7 5.6" />
                   </svg>
-                  <input id="username" name="username" type="text" autocomplete="username" placeholder="3 位以上，比如 lin" autocapitalize="none" spellcheck="false" />
+                  <input id="username" name="username" type="text" autocomplete="username" aria-describedby="usernameHint" autocapitalize="none" autocorrect="off" spellcheck="false" />
                 </span>
+                <span class="field__hint" id="usernameHint">3–20 位字母、数字或下划线，登录用，之后不能改</span>
               </label>
 
               <label class="field" id="displayNameField" hidden>
@@ -112,8 +113,9 @@
                     <circle cx="10" cy="8.4" r="3.4" />
                     <path d="M16.6 13.6 19 16l-.4 2.4" />
                   </svg>
-                  <input id="displayName" name="displayName" type="text" autocomplete="nickname" placeholder="比如 小林" maxlength="20" />
+                  <input id="displayName" name="displayName" type="text" autocomplete="nickname" aria-describedby="displayNameHint" maxlength="10" />
                 </span>
+                <span class="field__hint" id="displayNameHint">家人会在每笔账上看到这个名字</span>
               </label>
 
               <label class="field">
@@ -123,7 +125,7 @@
                     <rect x="4.5" y="10" width="15" height="10" rx="2.5" />
                     <path d="M8 10V7.3A4 4 0 0 1 16 7.3V10" />
                   </svg>
-                  <input id="password" name="password" type="password" autocomplete="current-password" placeholder="至少 8 位" />
+                  <input id="password" name="password" type="password" autocomplete="current-password" aria-describedby="passwordHint" autocapitalize="off" autocorrect="off" />
                   <button type="button" id="peekPassword" class="field__peek" aria-label="显示密码">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                       <path d="M2.8 12S6.3 6.2 12 6.2 21.2 12 21.2 12 17.7 17.8 12 17.8 2.8 12 2.8 12Z" />
@@ -131,9 +133,10 @@
                     </svg>
                   </button>
                 </span>
+                <span class="field__hint" id="passwordHint">至少 8 位，建议字母加数字</span>
               </label>
 
-              <p class="authform__error" id="authError" hidden></p>
+              <p class="authform__error" id="authError" role="alert" hidden></p>
 
               <button type="submit" id="authSubmit" class="btn btn--primary btn--block" disabled>
                 <span class="btn__label" id="authSubmitText">登录</span>

@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS users (
   username      TEXT NOT NULL UNIQUE,          -- 登录名，区分大小写；存小写副本用于比对
   display_name  TEXT NOT NULL,
   pwd_hash      TEXT NOT NULL,                 -- HMAC-SHA256(pepper, clientPBKDF2(password))
+  avatar        TEXT,                          -- 'emoji:cat' 或 'data:image/webp;base64,...'
   created_at    INTEGER NOT NULL
 );
 

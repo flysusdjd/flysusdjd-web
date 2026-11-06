@@ -215,14 +215,52 @@ async function logout(request, env) {
 }
 
 async function me(request, env, user) {
+  const self = await env.DB.prepare('SELECT avatar FROM users WHERE id = ?').bind(user.id).first();
   const members = await env.DB.prepare(
-    `SELECT u.id, u.username, u.display_name, m.role
+    `SELECT u.id, u.username, u.display_name, u.avatar, m.role
        FROM household_members m JOIN users u ON u.id = m.user_id
       WHERE m.household_id = ? ORDER BY m.joined_at`,
   )
     .bind(user.householdId)
     .all();
-  return ok({ user, members: members.results ?? [] });
+  return ok({ user: { ...user, avatar: self?.avatar ?? null }, members: members.results ?? [] });
+}
+
+/* ------------------------------------------------------------ 改资料 */
+
+const AVATAR_EMOJI = /^emoji:(initial|cat|dog|fox|bear|rabbit|panda|fish)$/;
+const AVATAR_IMAGE = /^data:image\/(webp|png|jpeg);base64,[A-Za-z0-9+/=]{100,40000}$/;
+
+async function updateMe(request, env, user) {
+  const body = await request.json().catch(() => null);
+  if (!body) return bad('请求格式不对 / Malformed body');
+
+  const sets = [];
+  const params = [];
+
+  if (body.displayName !== undefined) {
+    const name = String(body.displayName || '').trim();
+    if (name.length < 1 || name.length > 10) return bad('称呼请填 1–10 个字');
+    sets.push('display_name = ?');
+    params.push(name);
+  }
+
+  if (body.avatar !== undefined) {
+    const av = body.avatar === null ? null : String(body.avatar);
+    if (av !== null && !AVATAR_EMOJI.test(av) && !AVATAR_IMAGE.test(av)) {
+      return bad('头像格式不支持');
+    }
+    if (av !== null && av.length > 40000) return bad('头像太大了，换一张小点的');
+    sets.push('avatar = ?');
+    params.push(av);
+  }
+
+  if (!sets.length) return bad('没有要改的内容');
+
+  params.push(user.id);
+  await env.DB.prepare(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`).bind(...params).run();
+
+  return ok({ ok: true, displayName: body.displayName ?? undefined, avatar: body.avatar ?? undefined });
 }
 
 /* ------------------------------------------------------------------ 分类 */
@@ -508,6 +546,101 @@ async function createInvite(env, user) {
   return ok({ ok: true, code, expiresAt: expires, ttlSeconds: 600 });
 }
 
+/**
+ * 退出家庭。三种情况：
+ *  - 非创建者且账本里还有别人 → 直接退出成员关系
+ *  - 创建者且账本里还有别人   → 把创建者身份转给最早加入的另一个人，再退出
+ *  - 只剩自己一个人           → 把自己的账目与分类整体搬到新建的账本，不删任何数据
+ * 无论哪种，退出后必须给这个账号留一个新账本，否则 householdId 为空、所有接口返回空。
+ */
+async function leaveHousehold(request, env, user) {
+  const body = await request.json().catch(() => ({}));
+  const confirm = body?.confirm === true;
+  if (!confirm) return fail(400, 'need_confirm', '这个操作需要先确认');
+
+  const current = await env.DB.prepare(
+    'SELECT household_id, role FROM household_members WHERE user_id = ? ORDER BY joined_at DESC LIMIT 1',
+  )
+    .bind(user.id)
+    .first();
+  if (!current) return fail(409, 'no_household', '账号还没有账本');
+
+  const others = await env.DB.prepare(
+    'SELECT u.id, u.display_name, m.role, m.joined_at FROM household_members m JOIN users u ON u.id = m.user_id WHERE m.household_id = ? AND m.user_id <> ? ORDER BY m.joined_at',
+  )
+    .bind(current.household_id, user.id)
+    .all();
+  const peer = (others.results ?? [])[0];
+
+  const newHouseId = uid();
+  const t = now();
+  const newName = user.displayName ? `${user.displayName}的账本` : '我的账本';
+
+  const steps = [];
+
+  if (peer && current.role === 'owner') {
+    // 转让创建者
+    steps.push(
+      env.DB.prepare("UPDATE household_members SET role = 'owner' WHERE household_id = ? AND user_id = ?")
+        .bind(current.household_id, peer.id),
+    );
+  }
+
+  // 离开旧账本
+  steps.push(
+    env.DB.prepare('DELETE FROM household_members WHERE household_id = ? AND user_id = ?')
+      .bind(current.household_id, user.id),
+  );
+
+  // 建新账本并成为创建者
+  steps.push(
+    env.DB.prepare(
+      'INSERT INTO households (id, name, invite_code, invite_expires_at, created_at) VALUES (?, ?, NULL, NULL, ?)',
+    ).bind(newHouseId, newName, t),
+  );
+  steps.push(
+    env.DB.prepare(
+      "INSERT INTO household_members (household_id, user_id, role, joined_at) VALUES (?, ?, 'owner', ?)",
+    ).bind(newHouseId, user.id, t),
+  );
+
+  await env.DB.batch(steps);
+  await seedCategories(env, newHouseId);
+
+  // 原来那本只剩自己 → 把自己的账目和分类整体搬到新账本
+  let moved = 0;
+  if (!peer) {
+    const catMap = new Map();
+    const oldCats = await env.DB.prepare('SELECT id, name, direction FROM categories WHERE household_id = ?')
+      .bind(current.household_id)
+      .all();
+    const newCats = await env.DB.prepare('SELECT id, name, direction FROM categories WHERE household_id = ?')
+      .bind(newHouseId)
+      .all();
+    for (const c of oldCats.results ?? []) {
+      const hit = (newCats.results ?? []).find((n) => n.name === c.name && n.direction === c.direction);
+      if (hit) catMap.set(c.id, hit.id);
+    }
+    const moves = [];
+    for (const [oldId, newId] of catMap) {
+      moves.push(
+        env.DB.prepare('UPDATE entries SET household_id = ?, category_id = ? WHERE household_id = ? AND category_id = ?')
+          .bind(newHouseId, newId, current.household_id, oldId),
+      );
+    }
+    if (moves.length) await env.DB.batch(moves);
+    // 剩下对不上分类的账目也搬过去，保持数据不丢
+    await env.DB.prepare(
+      'UPDATE entries SET household_id = ? WHERE household_id = ?',
+    ).bind(newHouseId, current.household_id).run();
+
+    await env.DB.prepare('DELETE FROM households WHERE id = ?').bind(current.household_id).run();
+    moved = 1;
+  }
+
+  return ok({ ok: true, householdId: newHouseId, householdName: newName, moved });
+}
+
 async function joinHousehold(request, env, user) {
   const body = await request.json().catch(() => null);
   const code = String(body?.code || '').trim().toUpperCase();
@@ -535,18 +668,24 @@ async function joinHousehold(request, env, user) {
     .bind(house.id, user.id, now())
     .run();
 
-  // 加入之后，把自己那个只有一个人的空账本收掉，免得账号挂在废弃账本上
-  await env.DB.batch([
-    env.DB.prepare(
-      `DELETE FROM household_members
-        WHERE user_id = ? AND household_id <> ?
-          AND (SELECT COUNT(*) FROM household_members x
-                WHERE x.household_id = household_members.household_id) = 1`,
-    ).bind(user.id, house.id),
-    env.DB.prepare(
-      'DELETE FROM households WHERE id NOT IN (SELECT household_id FROM household_members)',
-    ),
-  ]);
+  // 把「只有我一个人，而且一笔账都没记」的旧账本收掉，免得账号挂在废弃账本上。
+  // 有账目的旧账本必须留着 —— 删掉会把 entries 一起 CASCADE 掉（旧版本真的这么干过）。
+  const oldHouses = await env.DB.prepare(
+    `SELECT m.household_id AS id,
+            (SELECT COUNT(*) FROM household_members x WHERE x.household_id = m.household_id) AS members,
+            (SELECT COUNT(*) FROM entries e WHERE e.household_id = m.household_id) AS entries
+       FROM household_members m
+      WHERE m.user_id = ? AND m.household_id <> ?`,
+  )
+    .bind(user.id, house.id)
+    .all();
+
+  for (const h of oldHouses.results ?? []) {
+    if (h.members === 1 && h.entries === 0) {
+      await env.DB.prepare('DELETE FROM household_members WHERE household_id = ?').bind(h.id).run();
+      await env.DB.prepare('DELETE FROM households WHERE id = ?').bind(h.id).run();
+    }
+  }
 
   await env.DB.prepare('UPDATE households SET invite_code = NULL, invite_expires_at = NULL WHERE id = ?')
     .bind(house.id)
@@ -577,6 +716,7 @@ export default {
       if (!user.householdId) return fail(409, 'no_household', '账号还没有账本');
 
       if (pathname === '/api/me' && method === 'GET') return await me(request, env, user);
+      if (pathname === '/api/me' && method === 'PATCH') return await updateMe(request, env, user);
       if (pathname === '/api/categories' && method === 'GET') return await listCategories(env, user);
       if (pathname === '/api/categories' && method === 'POST') return await createCategory(request, env, user);
 
@@ -597,6 +737,7 @@ export default {
 
       if (pathname === '/api/household/invite' && method === 'POST') return await createInvite(env, user);
       if (pathname === '/api/household/join' && method === 'POST') return await joinHousehold(request, env, user);
+      if (pathname === '/api/household/leave' && method === 'POST') return await leaveHousehold(request, env, user);
 
       return fail(404, 'not_found', '没有这个接口 / Unknown endpoint');
     } catch (err) {

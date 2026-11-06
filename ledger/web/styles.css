@@ -15,7 +15,7 @@
   --line-strong: rgba(38, 30, 24, 0.16);
   --text: #221d19;
   --text-2: #5d554d;
-  --muted: #8d8278;
+  --muted: #6f665e;
 
   /* 强调 */
   --accent: #c0562c;
@@ -1964,10 +1964,24 @@ button.summary__cell:hover {
 .cal__mon:focus-visible,
 .pop__title:focus-visible,
 .key:focus-visible,
-.row:focus-visible,
-input:focus-visible,
-select:focus-visible,
-summary:focus-visible {
+.row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 10px;
+}
+
+/* 输入类控件自己有「外框 + 柔光」的复合焦点态，不能再叠一层 outline */
+.field__box input:focus-visible,
+.field__box select:focus-visible,
+.searchbox input:focus-visible,
+.input:focus-visible,
+.select:focus-visible,
+.authform input:focus-visible {
+  outline: none;
+}
+
+/* 但纯文本域没有外框，仍需可见焦点 */
+textarea:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
   border-radius: 10px;
@@ -2653,4 +2667,156 @@ summary:focus-visible {
   .compose__left .keypad {
     margin-top: 0;
   }
+}
+
+@media (max-width: 560px) {
+  .pop__presets {
+    flex-wrap: wrap;
+    overflow: visible;
+  }
+}
+
+
+/* Edge 会往密码框塞一个原生眼睛，和我们自己的 peek 按钮重复 */
+.field__box input::-ms-reveal,
+.field__box input::-ms-clear {
+  display: none;
+}
+
+/* 字段下方的辅助说明 */
+.field__hint {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* ---------- 金额输入 v2：计算器式，含小数点与清空 ---------- */
+.amount {
+  position: relative;
+}
+
+.amount__value[data-fit='lg'] {
+  font-size: clamp(32px, 4.4vw, 42px);
+}
+
+.amount__value[data-fit='md'] {
+  font-size: clamp(26px, 3.4vw, 34px);
+}
+
+.amount__value[data-fit='sm'] {
+  font-size: clamp(21px, 2.8vw, 28px);
+}
+
+.amount__clear {
+  position: absolute;
+  right: 0;
+  top: 6px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.amount__clear:hover {
+  background: var(--surface-3);
+}
+
+.amount__clear:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* 小数点键：按过之后禁用 */
+.key[data-key='.']:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* ---------- 改资料弹层 ---------- */
+.avatarpick {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.avatarpick__item {
+  display: grid;
+  place-items: center;
+  height: 56px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.avatarpick__item.is-active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 3px var(--accent-line);
+}
+
+.avatarpick__item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.avatarpick__upload {
+  color: var(--muted);
+}
+
+.avatarpick .avatar {
+  width: 32px;
+  height: 32px;
+  font-size: 15px;
+}
+
+.checkrow {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin: 14px 0 4px;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.checkrow input {
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  accent-color: var(--accent);
+  flex: none;
+}
+
+/* 头像三种形态 */
+.avatar--img,
+.profile__avatar.avatar--img {
+  padding: 0;
+  overflow: hidden;
+  background: var(--surface-2);
+}
+
+.avatar--img img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.avatar--emoji,
+.profile__avatar.avatar--emoji {
+  font-size: 17px;
+}
+
+.profile__avatar.avatar--emoji {
+  font-size: 22px;
 }
