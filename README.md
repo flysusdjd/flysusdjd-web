@@ -23,8 +23,16 @@ Open it, hit digits, done in about three seconds. Works offline; queued entries 
 | `index.html` `assets/` | 个人主页（纯静态单页） | a personal homepage (plain static single page) |
 | `ledger/` | 家庭记账本（Worker + D1 + PWA） | the family ledger app (Cloudflare Worker + D1 + PWA) |
 
-个人主页已上线在 Netlify，记账本跑在 Cloudflare 上（见下文部署部分）。
-The homepage is served by Netlify; the ledger runs on Cloudflare (see *Deploy* below).
+个人主页：<https://flysusdjd.netlify.app>
+记账本：<https://jizhang-flysusdjd.netlify.app>
+
+> 为什么记账本的前端也在 Netlify：`*.workers.dev` 在中国大陆被干扰（TLS 握手直接失败），
+> 所以静态文件放在国内能打开的 Netlify，API 仍然跑在 Cloudflare Worker 上，
+> 由 `ledger/web/_redirects` 把 `/api/*` 转发过去 —— 同一个域名，cookie 照常工作。
+
+Homepage: <https://flysusdjd.netlify.app> · Ledger: <https://jizhang-flysusdjd.netlify.app>
+
+*Why is the frontend on Netlify too? `*.workers.dev` is interfered with in mainland China (TLS handshakes fail), so the static files live on Netlify while the API stays on a Cloudflare Worker; `ledger/web/_redirects` proxies `/api/*` there — same origin, so cookies keep working.*
 
 ---
 
@@ -140,6 +148,29 @@ npx wrangler deploy
 
 发布后会得到 `https://family-ledger.<你的子域>.workers.dev`。
 前端静态文件通过 `wrangler.toml` 里的 `[assets]` 一起发布，不需要单独部署。
+
+### 本项目的实际部署 / How this instance is deployed
+
+线上这一份是两段式部署的：
+
+| 部分 | 位置 | 说明 |
+| --- | --- | --- |
+| 前端（HTML/CSS/JS/PWA） | Netlify `jizhang-flysusdjd.netlify.app` | `python ledger/scripts/pack-web.py` 打 zip，拖到 Netlify Drop |
+| API + 数据库 | Cloudflare Worker + D1 | `wrangler deploy`，地址 `family-ledger.flysusdjd.workers.dev` |
+
+两者之间靠 `ledger/web/_redirects` 里的一行代理连起来：
+
+```
+/api/*  https://family-ledger.flysusdjd.workers.dev/api/:splat  200
+```
+
+改前端的流程：改 `ledger/web/` → `python ledger/scripts/pack-web.py` → 把新 zip 拖到 Netlify 项目的 deploys 页。
+改后端的流程：改 `ledger/worker/` → `cd ledger && npx wrangler deploy`。
+
+*Two-part deploy: static files on Netlify, API on a Worker + D1, wired together by one proxy line in `_redirects`.*
+
+> 备注 / note：因为本机沙箱不允许创建子进程，这里的 `wrangler` 是通过 esbuild stub 跑的（单文件 worker 不需要真打包）。
+> 在你自己的电脑上直接用 `npx wrangler` 就行，不需要这些东西。
 
 *Everything fits in the free tier. The only step that needs your own Cloudflare login is `wrangler login`.*
 

@@ -21,4 +21,4 @@ not_found_handling = "single-page-application"
 [[d1_databases]]
 binding = "DB"
 database_name = "family-ledger"
-database_id = "PUT-YOUR-DATABASE-ID-HERE"
+database_id = "c5f8cbf2-57a4-4600-951b-42cba0d2aa1f"
