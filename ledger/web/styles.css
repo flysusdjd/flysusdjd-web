@@ -34,7 +34,7 @@
   --sh-1: 0 1px 2px rgba(34, 29, 25, 0.04), 0 8px 24px -12px rgba(34, 29, 25, 0.12);
   --sh-2: 0 2px 8px rgba(34, 29, 25, 0.06), 0 24px 48px -32px rgba(34, 29, 25, 0.22);
   --nav-w: 224px;
-  --tabbar-h: 62px;
+  --tabbar-h: 65px;
 
   --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB",
     "Microsoft YaHei", "Source Han Sans SC", sans-serif;
@@ -735,7 +735,8 @@ svg {
 
 .view {
   width: 100%;
-  max-width: 880px;
+  max-width: 1080px;
+  margin: 0 auto;
   padding: 20px clamp(16px, 3vw, 32px) 56px;
 }
 
@@ -780,7 +781,19 @@ svg {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
   gap: 14px;
-  align-items: start;
+  align-items: stretch;
+}
+
+@media (min-width: 861px) {
+  .compose > .card {
+    display: flex;
+    flex-direction: column;
+    min-height: 434px;
+  }
+
+  .compose__left .keypad {
+    margin-top: auto;
+  }
 }
 
 .compose__left,
@@ -1967,11 +1980,9 @@ summary:focus-visible {
 @keyframes viewIn {
   from {
     opacity: 0;
-    transform: translateY(4px);
   }
   to {
     opacity: 1;
-    transform: none;
   }
 }
 
@@ -2008,8 +2019,13 @@ summary:focus-visible {
 }
 
 .pop {
+  position: fixed;
+  top: 60px;
+  left: 12px;
   z-index: 41;
-  width: 340px;
+  width: 360px;
+  max-height: min(78vh, 620px);
+  overflow: auto;
   padding: 12px;
   border: 1px solid var(--line);
   border-radius: var(--r-lg);
@@ -2020,6 +2036,7 @@ summary:focus-visible {
   transition:
     opacity var(--dur-2) var(--ease-out),
     transform var(--dur-2) var(--ease-out);
+
 }
 
 .pop.is-open {
@@ -2336,4 +2353,304 @@ summary:focus-visible {
 .binrow .row__amount {
   color: var(--muted);
   font-variant-numeric: tabular-nums;
+}
+/* =============================================================================
+   v5：中文日历（周一起始 / 双行 公历+农历 / 今日实心 / 当日合计）
+   ============================================================================= */
+
+.pop__head {
+  position: relative;
+}
+
+.pop__today {
+  position: absolute;
+  right: 34px;
+  top: 50%;
+  transform: translateY(-50%);
+  height: 26px;
+  padding: 0 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-2);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.pop__today:hover {
+  border-color: var(--accent-line);
+  color: var(--accent-strong);
+}
+
+.calcard {
+  margin: 2px 0 10px;
+  padding: 11px 13px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+}
+
+.calcard__top {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.calcard__date {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.calcard__week {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.calcard__lunar {
+  margin-top: 3px;
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+
+.calcard__sum {
+  margin-top: 7px;
+  font-size: 13px;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.calcard__sum.is-empty {
+  color: var(--muted);
+}
+
+.cal__grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 2px;
+}
+
+.cal__day {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  min-height: 46px;
+  min-width: 0;
+  padding: 4px 0 5px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+  transition: background var(--dur-1) var(--ease-std);
+}
+
+.cal__day:hover {
+  background: var(--surface-2);
+}
+
+.cal__num {
+  font-size: 14px;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+}
+
+.cal__sub {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 10px;
+  line-height: 1.15;
+  color: var(--muted);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.cal__day.is-out {
+  opacity: 0.4;
+}
+
+.cal__day.is-today-outline {
+  box-shadow: inset 0 0 0 1.5px var(--accent-line);
+}
+
+.cal__day.is-sel {
+  background: var(--accent);
+  color: #fff;
+}
+
+.cal__day.is-sel .cal__sub {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.cal__day.has-entry::after {
+  content: '';
+  position: absolute;
+  top: 5px;
+  left: calc(50% + 11px);
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--accent);
+  opacity: 0.6;
+}
+
+.cal__day.is-sel.has-entry::after {
+  background: #fff;
+  opacity: 0.95;
+}
+
+.dayhead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding: 11px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+
+.dayhead__main {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.dayhead__main b {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.dayhead__main span {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.dayhead__lunar {
+  color: var(--text-2) !important;
+}
+
+@media (max-width: 860px) {
+  .cal__day {
+    min-height: 44px;
+  }
+
+  .cal__num {
+    font-size: 13.5px;
+  }
+
+  .cal__sub {
+    font-size: 9.5px;
+  }
+
+  .pop.is-sheet .calcard {
+    margin-top: 0;
+  }
+}
+
+.chip--today[data-on] {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-weight: 500;
+}
+
+/* ---------- 桌面端：明细改成紧凑表格行 ---------- */
+@media (min-width: 861px) {
+  .pop__presets {
+    flex-wrap: wrap;
+    overflow: visible;
+  }
+
+  .rows {
+    gap: 0;
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+    background: var(--surface);
+    overflow: hidden;
+  }
+
+  .row {
+    min-height: 52px;
+    padding: 0 16px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .row:last-child {
+    border-bottom: 0;
+  }
+
+  .row:hover {
+    background: var(--surface-2);
+    border-color: transparent;
+  }
+
+  .daygroup + .daygroup {
+    margin-top: 16px;
+  }
+
+  .daygroup__head {
+    padding: 0 2px 6px;
+    font-size: 12.5px;
+  }
+}
+
+/* ---------- 手机 KPI：1+2 布局，避免六位数溢出 ---------- */
+@media (max-width: 560px) {
+  .summary {
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  .summary__cell:first-child {
+    grid-column: 1 / -1;
+  }
+
+  .summary__cell:first-child .summary__value {
+    font-size: 24px;
+  }
+
+  .summary__value {
+    font-size: 17px;
+    letter-spacing: 0;
+  }
+
+  .summary__cell {
+    padding: 11px 13px;
+  }
+}
+
+@media (max-width: 560px) {
+  .pop__presets {
+    gap: 6px;
+  }
+
+  .pop__presets .chip {
+    height: 28px;
+    padding: 0 10px;
+    font-size: 12px;
+  }
+}
+
+@media (min-width: 861px) {
+  .compose__left .amount {
+    flex: 1;
+    align-items: center;
+  }
+
+  .compose__left .keypad {
+    margin-top: 0;
+  }
 }

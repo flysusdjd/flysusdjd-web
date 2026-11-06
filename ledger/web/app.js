@@ -3,6 +3,8 @@
    数据结构与接口沿用 worker/index.js，不新增后端字段。
    ============================================================================= */
 
+import { cellLabel, lunarLine, termOf, solarToLunar } from './lunar.js';
+
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
@@ -70,7 +72,7 @@ const catIcon = (name) => icon(CATEGORY_ICON[name] || 'other');
 const pad = (n) => String(n).padStart(2, '0');
 
 /* 触屏和键盘两套提示 */
-const isTouch = () => window.innerWidth <= 860 || navigator.maxTouchPoints > 0;
+const isTouch = () => window.innerWidth <= 860 || window.matchMedia('(pointer: coarse)').matches;
 const saveHint = () => (isTouch() ? '选好分类就能保存' : '电脑上可以直接按数字键，回车保存。');
 
 const todayStr = () => {
@@ -503,12 +505,22 @@ $('#sideUser').addEventListener('click', () => setView('me'));
 
 /* ============================================================ 日期范围 */
 
-/** 把 range 渲染成顶部那行字：2026 年 11 月 / 11 月 1 日 – 11 月 7 日 */
+/** 把 range 渲染成顶部那行字：2026 年 11 月 / 11 月 1 日 – 11 月 7 日 / 11 月 7 日 */
 function fmtRangeCN(r) {
-  if (!r || r.kind === 'month') return fmtMonthCN(r?.month || state.month);
-  const md = (d) => `${Number(d.slice(5, 7))} 月 ${Number(d.slice(8, 10))} 日`;
-  if (r.from === r.to) return md(r.from);
-  return `${md(r.from)} – ${md(r.to)}`;
+  if (!r || r.kind === 'month') return fmtMonthCN(r?.month || todayYmd().slice(0, 7));
+  if (r.kind === 'day') return mdCN(r.day);
+  if (r.label) return r.label;
+  if (r.from === r.to) return mdCN(r.from);
+  return `${mdCN(r.from)} – ${mdCN(r.to)}`;
+}
+
+/** 统计/明细都用它，避免两处各自算边界 */
+function rangeBounds(r) {
+  if (!r) return { from: todayYmd().slice(0, 7) + '-01', to: todayYmd() };
+  if (r.kind === 'day') return { from: r.day, to: r.day };
+  if (r.kind === 'range') return { from: r.from, to: r.to };
+  const [y, m] = r.month.split('-').map(Number);
+  return { from: `${r.month}-01`, to: `${r.month}-${pad2(new Date(y, m, 0).getDate())}` };
 }
 
 function queryFor() {
@@ -516,6 +528,9 @@ function queryFor() {
   if (state.range.kind === 'range') {
     q.set('from', state.range.from);
     q.set('to', state.range.to);
+  } else if (state.range.kind === 'day') {
+    q.set('from', state.range.day);
+    q.set('to', state.range.day);
   } else {
     q.set('month', state.range.month);
   }
@@ -524,27 +539,29 @@ function queryFor() {
 
 function setRange(r) {
   state.range = r;
-  if (r.kind === 'month') state.month = r.month;
   paintShell();
   loadEntries();
   loadStats();
   render();
 }
 
-$('#monthPrev').addEventListener('click', () => shiftMonth(-1));
-$('#monthNext').addEventListener('click', () => shiftMonth(1));
+$('#monthPrev').addEventListener('click', () => shiftRange(-1));
+$('#monthNext').addEventListener('click', () => shiftRange(1));
 
-/** 左右箭头永远按「整月」移动；自定义区间会被重置成整月 */
-function shiftMonth(delta) {
-  const base = state.range.kind === 'month' ? state.range.month : (state.range.from || monthStr()).slice(0, 7);
+/** 整月翻整月、单日翻单日；自定义区间按起点的月份整月移动 */
+function shiftRange(delta) {
+  const r = state.range;
+  if (r.kind === 'day') return setRange({ kind: 'day', day: shiftYmd(r.day, delta) });
+  const base = r.kind === 'month' ? r.month : (r.from || todayYmd()).slice(0, 7);
   const [y, m] = base.split('-').map(Number);
   const d = new Date(y, m - 1 + delta, 1);
-  setRange({ kind: 'month', month: `${d.getFullYear()}-${pad(d.getMonth() + 1)}` });
+  setRange({ kind: 'month', month: `${d.getFullYear()}-${pad2(d.getMonth() + 1)}` });
 }
 
 /* ------------------------------------------------------------ 日期面板 */
 
-const pick = { mode: 'days', month: monthStr(), start: null, end: null };
+const WEEK_CN = ['一', '二', '三', '四', '五', '六', '日'];
+const WD_CN = ['日', '一', '二', '三', '四', '五', '六'];
 const pad2 = (n) => String(n).padStart(2, '0');
 const ymdOf = (y, m, d) => `${y}-${pad2(m)}-${pad2(d)}`;
 const todayYmd = () => {
@@ -556,6 +573,20 @@ const shiftYmd = (ymd, days) => {
   const t = new Date(y, m - 1, d + days);
   return ymdOf(t.getFullYear(), t.getMonth() + 1, t.getDate());
 };
+const mdCN = (ymd) => `${Number(ymd.slice(5, 7))} 月 ${Number(ymd.slice(8, 10))} 日`;
+const weekdayOf = (ymd) => {
+  const [y, m, d] = ymd.split('-').map(Number);
+  return new Date(y, m - 1, d).getDay();
+};
+
+const pick = {
+  mode: 'days',
+  month: todayYmd().slice(0, 7),
+  sel: todayYmd(),
+  data: new Map(),
+  loading: false,
+};
+const monthAggCache = new Map();
 
 const PRESETS = [
   { key: 'thisMonth', label: '本月' },
@@ -576,10 +607,10 @@ function presetRange(key) {
     const d = new Date(y, m - 2, 1);
     return { kind: 'month', month: `${d.getFullYear()}-${pad2(d.getMonth() + 1)}` };
   }
-  if (key === 'last7') return { kind: 'range', from: shiftYmd(today, -6), to: today };
-  if (key === 'last30') return { kind: 'range', from: shiftYmd(today, -29), to: today };
-  if (key === 'thisYear') return { kind: 'range', from: `${y}-01-01`, to: today };
-  if (key === 'all') return { kind: 'range', from: '2000-01-01', to: today };
+  if (key === 'last7') return { kind: 'range', from: shiftYmd(today, -6), to: today, label: '近 7 天' };
+  if (key === 'last30') return { kind: 'range', from: shiftYmd(today, -29), to: today, label: '近 30 天' };
+  if (key === 'thisYear') return { kind: 'range', from: `${y}-01-01`, to: today, label: '今年' };
+  if (key === 'all') return { kind: 'range', from: '2000-01-01', to: today, label: '全部' };
   return { kind: 'month', month: `${y}-${pad2(m)}` };
 }
 
@@ -587,12 +618,43 @@ function popEl() {
   return $('#pop');
 }
 
+async function loadPickMonth(month) {
+  if (monthAggCache.has(month)) {
+    pick.data = monthAggCache.get(month);
+    renderPick();
+    return;
+  }
+  pick.loading = true;
+  pick.data = new Map();
+  renderPick();
+  try {
+    const q = new URLSearchParams({ month, member: state.scope });
+    const data = await api('GET', `/api/entries?${q}`);
+    const map = new Map();
+    (data.entries || []).forEach((e) => {
+      const cur = map.get(e.occurred_on) || { expense: 0, income: 0, count: 0 };
+      if (e.direction === 'expense') cur.expense += e.amount_cents;
+      else cur.income += e.amount_cents;
+      cur.count += 1;
+      map.set(e.occurred_on, cur);
+    });
+    if (monthAggCache.size > 24) monthAggCache.clear();
+    monthAggCache.set(month, map);
+    if (month === pick.month) pick.data = map;
+  } catch {
+    if (month === pick.month) pick.data = new Map();
+  } finally {
+    pick.loading = false;
+    if (!$('#pop').hidden) renderPick();
+  }
+}
+
 function openPick() {
   const r = state.range;
   pick.mode = 'days';
-  pick.month = r.kind === 'month' ? r.month : (r.from || monthStr()).slice(0, 7);
-  pick.start = r.kind === 'range' ? r.from : null;
-  pick.end = r.kind === 'range' ? r.to : null;
+  pick.month = r.kind === 'month' ? r.month : (r.day || r.from || todayYmd()).slice(0, 7);
+  pick.sel = r.kind === 'day' ? r.day : r.kind === 'range' ? r.from : todayYmd();
+  pick.data = monthAggCache.get(pick.month) || new Map();
   renderPick();
   const pop = popEl();
   $('#popBack').hidden = false;
@@ -600,16 +662,16 @@ function openPick() {
   pop.classList.toggle('is-sheet', window.innerWidth <= 860);
   if (window.innerWidth > 860) {
     const rect = $('#monthLabel').getBoundingClientRect();
-    pop.style.left = `${Math.max(12, Math.min(rect.left, window.innerWidth - 380))}px`;
-    pop.style.top = `${rect.bottom + 8}px`;
+    pop.style.left = `${Math.max(12, Math.min(rect.left, window.innerWidth - 372))}px`;
+    pop.style.top = `${Math.min(rect.bottom + 8, window.innerHeight - 200)}px`;
   } else {
     pop.style.left = '';
     pop.style.top = 'auto';
   }
   $('#monthLabel').setAttribute('aria-expanded', 'true');
   requestAnimationFrame(() => pop.classList.add('is-open'));
-  const seed = pick.start || todayYmd();
-  const target = pop.querySelector(`.cal__day[data-day="${seed}"]`) || pop.querySelector('.pop__title');
+  loadPickMonth(pick.month);
+  const target = pop.querySelector('.cal__day[data-day]') || pop.querySelector('.pop__title');
   target?.focus?.();
 }
 
@@ -622,11 +684,10 @@ function closePick({ restoreFocus = true } = {}) {
   if (restoreFocus) $('#monthLabel').focus();
 }
 
-function applyPickRange(from, to) {
-  if (!from || !to) return;
-  const [a, b] = from <= to ? [from, to] : [to, from];
+function goDay(day) {
   closePick();
-  setRange({ kind: 'range', from: a, to: b });
+  setRange({ kind: 'day', day });
+  if (state.view !== 'list' && state.view !== 'stats') setView('list');
 }
 
 function renderPick() {
@@ -636,48 +697,61 @@ function renderPick() {
 
   let body = '';
   if (pick.mode === 'days') {
-    const first = new Date(y, m - 1, 1);
-    const offset = first.getDay();
-    const days = new Date(y, m, 0).getDate();
-    const prevDays = new Date(y, m - 1, 0).getDate();
+    const offset = (new Date(y, m - 1, 1).getDay() + 6) % 7; // 周一起始
+    const dim = new Date(y, m, 0).getDate();
+    const prevDim = new Date(y, m - 1, 0).getDate();
     const cells = [];
     for (let i = offset - 1; i >= 0; i -= 1) {
-      cells.push(`<span class="cal__day is-out">${prevDays - i}</span>`);
+      const d = prevDim - i;
+      const ym = m === 1 ? { y: y - 1, m: 12 } : { y, m: m - 1 };
+      const day = ymdOf(ym.y, ym.m, d);
+      cells.push(`<button type="button" class="cal__day is-out" data-day="${day}" data-out="1" tabindex="-1">
+        <span class="cal__num">${d}</span><span class="cal__sub">${cellLabel(day)}</span></button>`);
     }
-    for (let d = 1; d <= days; d += 1) {
+    for (let d = 1; d <= dim; d += 1) {
       const day = ymdOf(y, m, d);
-      const isStart = day === pick.start;
-      const isEnd = day === pick.end;
-      const inRange = pick.start && pick.end && day >= pick.start && day <= pick.end;
-      const isToday = day === todayYmd();
-      const cls = ['cal__day', isStart || isEnd ? 'is-edge' : '', inRange ? 'is-in' : '', isToday ? 'is-today' : '']
+      const agg = pick.data.get(day);
+      const cls = [
+        'cal__day',
+        day === pick.sel ? 'is-sel' : '',
+        day === pick.sel && day === todayYmd() ? 'is-today' : '',
+        day === todayYmd() && day !== pick.sel ? 'is-today-outline' : '',
+        agg ? 'has-entry' : '',
+      ]
         .filter(Boolean)
         .join(' ');
-      const tab = isStart || (!pick.start && isToday) ? 0 : -1;
-      cells.push(`<button type="button" class="${cls}" data-day="${day}" tabindex="${tab}">${d}</button>`);
+      cells.push(`<button type="button" class="${cls}" data-day="${day}" aria-label="${mdCN(day)} ${lunarLine(day)}${agg ? `，${agg.count} 笔` : ''}">
+        <span class="cal__num">${d}</span><span class="cal__sub">${cellLabel(day)}</span></button>`);
     }
-    const tail = (7 - ((offset + days) % 7)) % 7;
-    for (let i = 1; i <= tail; i += 1) cells.push(`<span class="cal__day is-out">${i}</span>`);
+    const tailNeed = (7 - ((offset + dim) % 7)) % 7;
+    const tail = tailNeed === 0 ? 0 : tailNeed;
+    for (let i = 1; i <= tail; i += 1) {
+      const ym = m === 12 ? { y: y + 1, m: 1 } : { y, m: m + 1 };
+      const day = ymdOf(ym.y, ym.m, i);
+      cells.push(`<button type="button" class="cal__day is-out" data-day="${day}" data-out="1" tabindex="-1">
+        <span class="cal__num">${i}</span><span class="cal__sub">${cellLabel(day)}</span></button>`);
+    }
 
     body = `
-      <div class="cal__dow">${['日', '一', '二', '三', '四', '五', '六'].map((d) => `<span>${d}</span>`).join('')}</div>
+      <div class="cal__dow">${WEEK_CN.map((d) => `<span>${d}</span>`).join('')}</div>
       <div class="cal__grid">${cells.join('')}</div>`;
   } else {
     body = `<div class="cal__months">${Array.from({ length: 12 }, (_, i) => i + 1)
       .map((mm) => {
         const ym = `${y}-${pad2(mm)}`;
-        const on = state.range.kind === 'month' && state.range.month === ym;
+        const on = pick.month === ym;
         return `<button type="button" class="cal__mon${on ? ' is-on' : ''}" data-ym="${ym}">${mm} 月</button>`;
       })
       .join('')}</div>`;
   }
 
-  const selText =
-    pick.start && pick.end
-      ? fmtRangeCN({ kind: 'range', from: pick.start, to: pick.end })
-      : pick.start
-        ? `${fmtRangeCN({ kind: 'range', from: pick.start, to: pick.start })} · 再点一天作为结束`
-        : '点一天作为开始';
+  const selAgg = pick.data.get(pick.sel);
+  const selLine = pick.mode === 'days' ? lunarLine(pick.sel) : '';
+  const selSum = selAgg
+    ? `支出 ${fmtMoney(selAgg.expense)}${selAgg.income ? ` · 收入 ${fmtMoney(selAgg.income)}` : ''} · ${selAgg.count} 笔`
+    : pick.loading
+      ? '正在看这天的账…'
+      : '这天还没有记账';
 
   pop.innerHTML = `
     <div class="pop__head">
@@ -689,12 +763,21 @@ function renderPick() {
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.5 6.5 15.5 12l-6 5.5" /></svg>
       </button>
     </div>
+    <div class="calcard">
+      <div class="calcard__top">
+        <b class="calcard__date">${mdCN(pick.sel)}</b>
+        <span class="calcard__week">周${WD_CN[weekdayOf(pick.sel)]}</span>
+      </div>
+      ${selLine ? `<div class="calcard__lunar">${selLine}</div>` : ''}
+      <div class="calcard__sum${selAgg ? '' : ' is-empty'}">${selSum}</div>
+    </div>
     <div class="pop__presets">
+      <button type="button" class="chip chip--today" data-today${pick.sel === todayYmd() ? ' data-on' : ''}>今天</button>
       ${PRESETS.map((p) => `<button type="button" class="chip" data-preset="${p.key}">${p.label}</button>`).join('')}
     </div>
     ${body}
     <div class="pop__foot">
-      <span class="pop__sel">${selText}</span>
+      <button type="button" class="btn btn--primary btn--sm" data-seeday>看这天的账</button>
       <button type="button" class="btn btn--ghost btn--sm" data-close>取消</button>
     </div>`;
 }
@@ -709,16 +792,22 @@ popEl().addEventListener('click', (ev) => {
       const [py, pm] = pick.month.split('-').map(Number);
       const d = new Date(py, pm - 1 + step, 1);
       pick.month = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
+      pick.data = monthAggCache.get(pick.month) || new Map();
+      renderPick();
+      loadPickMonth(pick.month);
     } else {
       const [py] = pick.month.split('-').map(Number);
       pick.month = `${py + step}-01`;
+      renderPick();
+      loadPickMonth(pick.month);
     }
-    return renderPick();
+    return;
   }
   if (t.id === 'pickTitle') {
     pick.mode = pick.mode === 'days' ? 'months' : 'days';
     return renderPick();
   }
+  if (t.dataset.today !== undefined) return goDay(todayYmd());
   if (t.dataset.preset) {
     closePick();
     return setRange(presetRange(t.dataset.preset));
@@ -726,23 +815,21 @@ popEl().addEventListener('click', (ev) => {
   if (t.dataset.ym) {
     pick.mode = 'days';
     pick.month = t.dataset.ym;
-    return renderPick();
+    pick.data = monthAggCache.get(pick.month) || new Map();
+    renderPick();
+    loadPickMonth(pick.month);
+    return;
   }
+  if (t.dataset.seeday !== undefined) return goDay(pick.sel);
   if (t.dataset.day) {
     const day = t.dataset.day;
-    if (!pick.start || (pick.start && pick.end)) {
-      pick.start = day;
-      pick.end = null;
-      renderPick();
-      popEl().querySelector(`.cal__day[data-day="${day}"]`)?.focus();
-    } else if (day < pick.start) {
-      pick.end = pick.start;
-      pick.start = day;
-      applyPickRange(pick.start, pick.end);
-    } else {
-      pick.end = day;
-      applyPickRange(pick.start, pick.end);
+    pick.sel = day;
+    if (t.dataset.out) {
+      pick.month = day.slice(0, 7);
+      pick.data = monthAggCache.get(pick.month) || new Map();
+      loadPickMonth(pick.month);
     }
+    return goDay(day);
   }
 });
 
@@ -759,10 +846,13 @@ popEl().addEventListener('keydown', (ev) => {
   if (!(ev.key in map)) return;
   ev.preventDefault();
   const nextDay = shiftYmd(cur.dataset.day, map[ev.key]);
+  pick.sel = nextDay;
   if (nextDay.slice(0, 7) !== pick.month) {
     pick.month = nextDay.slice(0, 7);
-    renderPick();
+    pick.data = monthAggCache.get(pick.month) || new Map();
+    loadPickMonth(pick.month);
   }
+  renderPick();
   popEl().querySelector(`.cal__day[data-day="${nextDay}"]`)?.focus();
 });
 
@@ -782,30 +872,44 @@ $('#scopeToggle').addEventListener('click', () => {
 
 /* ================================================================== 数据 */
 
+let entriesSeq = 0;
 async function loadEntries() {
+  const seq = (entriesSeq += 1);
   state.entriesLoading = true;
   state.listError = '';
   render();
   try {
     const data = await api('GET', `/api/entries?${queryFor()}`);
+    if (seq !== entriesSeq) return;
     state.entries = data.entries || [];
+    state.rangeEcho = data.range || null;
   } catch (err) {
+    if (seq !== entriesSeq) return;
     state.listError = looksOffline(err) ? '网络不通，显示的是上次的数据' : err.message;
   } finally {
-    state.entriesLoading = false;
-    if (state.view === 'list' || state.view === 'stats') render();
+    if (seq === entriesSeq) {
+      state.entriesLoading = false;
+      if (state.view === 'list' || state.view === 'stats') render();
+    }
   }
 }
 
+let statsSeq = 0;
 async function loadStats() {
+  const seq = (statsSeq += 1);
   state.statsLoading = true;
   try {
-    state.stats = await api('GET', `/api/stats?${queryFor()}`);
+    const data = await api('GET', `/api/stats?${queryFor()}`);
+    if (seq !== statsSeq) return;
+    state.stats = data;
   } catch {
+    if (seq !== statsSeq) return;
     state.stats = null;
   } finally {
-    state.statsLoading = false;
-    if (state.view === 'stats') render();
+    if (seq === statsSeq) {
+      state.statsLoading = false;
+      if (state.view === 'stats') render();
+    }
   }
 }
 
@@ -954,8 +1058,18 @@ function renderList() {
   const income = sumOf(rows, 'income');
   const balance = income - expense;
 
-  const isMonthRange = state.range.kind === 'month';
-  const periodLabel = isMonthRange ? '本月' : '区间';
+  const isDay = state.range.kind === 'day';
+  const periodLabel = state.range.kind === 'month' ? '本月' : isDay ? '当日' : '区间';
+  const dayHead = isDay
+    ? `<div class="dayhead">
+        <div class="dayhead__main">
+          <b>${mdCN(state.range.day)}</b>
+          <span>周${WD_CN[weekdayOf(state.range.day)]}</span>
+          <span class="dayhead__lunar">${lunarLine(state.range.day)}</span>
+        </div>
+        <button type="button" class="btn btn--ghost btn--sm" data-back="month">回到整月</button>
+      </div>`
+    : '';
 
   const memberOptions = [
     { value: 'all', label: '全家' },
@@ -967,7 +1081,16 @@ function renderList() {
     ...state.categories.map((c) => ({ value: String(c.id), label: c.name })),
   ];
 
+  const periodEmpty = !state.entriesLoading && !state.entries.length && !filterActive();
+  if (periodEmpty) {
+    return `
+      ${dayHead}
+      ${state.listError ? `<p class="hint">${state.listError}</p>` : ''}
+      ${emptyBlock()}`;
+  }
+
   return `
+    ${dayHead}
     <div class="summary">
       <button type="button" class="summary__cell" data-jump="expense">
         <span class="summary__label">${periodLabel}支出</span>
@@ -1032,9 +1155,10 @@ function emptyBlock() {
       <span>换个关键词，或者清空筛选试试。</span>
     </div>`;
   }
+  const label = state.range.kind === 'day' ? mdCN(state.range.day) : fmtMonthCN((state.range.month || todayYmd().slice(0, 7)));
   return `<div class="empty">
     <span class="empty__icon">${icon('empty')}</span>
-    <b>${fmtMonthCN(state.month)}还没有记账</b>
+    <b>${label}还没有记账</b>
     <span>记一笔，月底就知道钱去哪了。</span>
     <button type="button" class="btn btn--primary btn--sm" data-goto="add">记一笔</button>
   </div>`;
@@ -1056,8 +1180,9 @@ function groupRows(rows) {
       const parts = [];
       if (exp) parts.push(`支出 ${fmtMoney(exp)}`);
       if (inc) parts.push(`收入 ${fmtMoney(inc)}`);
+      const headHidden = state.range.kind === 'day';
       return `<section class="daygroup">
-        <header class="daygroup__head">
+        <header class="daygroup__head"${headHidden ? ' hidden' : ''}>
           <span>${dayLabel(day)}</span>
           <span class="daygroup__sum">${parts.join(' · ')}</span>
         </header>
@@ -1092,23 +1217,27 @@ function renderStats() {
   const total = s.total || { expense: 0, income: 0, balance: 0 };
   const empty = !total.expense && !total.income;
 
-  const monthDays = Number(state.month.split('-')[1]);
-  const daysInMonth = new Date(Number(state.month.slice(0, 4)), monthDays, 0).getDate();
+  const bounds = rangeBounds(state.range);
+  const dayKeys = [];
+  for (let d = bounds.from; d <= bounds.to; d = shiftYmd(d, 1)) {
+    dayKeys.push(d);
+    if (dayKeys.length > 400) break;
+  }
   const byDay = new Map();
   (s.byDay || []).forEach((d) => {
     if (d.direction !== 'expense') return;
-    const key = String(d.day).slice(-2);
-    byDay.set(key, (byDay.get(key) || 0) + d.cents);
+    byDay.set(String(d.day).slice(0, 10), (byDay.get(String(d.day).slice(0, 10)) || 0) + d.cents);
   });
   const dayMax = Math.max(1, ...[...byDay.values()]);
-  const dayBars = Array.from({ length: daysInMonth }, (_, i) => {
-    const key = pad(i + 1);
-    const cents = byDay.get(key) || 0;
-    const h = cents ? Math.max(7, Math.round((cents / dayMax) * 100)) : 2;
-    return `<div class="spark__col" title="${Number(key)} 日 ${fmtMoney(cents)}">
+  const dayBars = dayKeys
+    .map((day) => {
+      const cents = byDay.get(day) || 0;
+      const h = cents ? Math.max(7, Math.round((cents / dayMax) * 100)) : 2;
+      return `<div class="spark__col" title="${mdCN(day)} ${fmtMoney(cents)}">
       <div class="spark__bar ${cents === dayMax && cents ? 'is-peak' : ''}" style="height:${cents ? h : 2}%"></div>
     </div>`;
-  }).join('');
+    })
+    .join('');
 
   const cats = (s.byCategory || []).filter((c) => c.direction === 'expense').sort((a, b) => b.cents - a.cents);
   const catMax = Math.max(1, ...cats.map((c) => c.cents));
@@ -1422,6 +1551,9 @@ function bindView() {
   });
   $$('[data-goto]', view).forEach((btn) => {
     btn.addEventListener('click', () => setView(btn.dataset.goto));
+  });
+  $$('[data-back="month"]', view).forEach((btn) => {
+    btn.addEventListener('click', () => setRange({ kind: 'month', month: todayYmd().slice(0, 7) }));
   });
 
   /* 我的 */

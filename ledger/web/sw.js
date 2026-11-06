@@ -9,7 +9,7 @@
  * 改了前端资源记得把 VERSION 加一，否则旧缓存会一直喂老文件。
  */
 
-const VERSION = 'v6';
+const VERSION = 'v7';
 const SHELL_CACHE = `ledger-shell-${VERSION}`;
 
 const SHELL = [
@@ -17,6 +17,7 @@ const SHELL = [
   '/index.html',
   '/styles.css',
   '/app.js',
+  '/lunar.js',
   '/manifest.webmanifest',
   '/icons/icon-192.png',
   '/icons/icon-512.png',
