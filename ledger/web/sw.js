@@ -9,7 +9,7 @@
  * 改了前端资源记得把 VERSION 加一，否则旧缓存会一直喂老文件。
  */
 
-const VERSION = 'v3';
+const VERSION = 'v4';
 const SHELL_CACHE = `ledger-shell-${VERSION}`;
 
 const SHELL = [

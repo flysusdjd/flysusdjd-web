@@ -296,24 +296,6 @@ svg {
   margin: 0;
 }
 
-.auth__note {
-  display: flex;
-  gap: 8px;
-  align-items: flex-start;
-  margin: 20px 0 0;
-  font-size: 12px;
-  line-height: 1.6;
-  color: var(--muted);
-}
-
-.auth__note svg {
-  width: 15px;
-  height: 15px;
-  margin-top: 2px;
-  flex: none;
-  fill: var(--muted-2);
-}
-
 /* --------------------------------------------------------------- 分段控件 */
 
 .segmented {
