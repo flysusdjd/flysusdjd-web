@@ -307,12 +307,31 @@ function openModal(html) {
 }
 
 /** 整块替换弹层内容（调用方自己带 .modal__card） */
-function showModal(html) {
+let modalReturnFocus = null;
+
+const FOCUSABLE_SEL =
+  'a[href], button:not([disabled]), input:not([disabled]):not([tabindex="-1"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+function modalFocusables() {
+  return [...$('#modal').querySelectorAll(FOCUSABLE_SEL)].filter((el) => el.getClientRects().length > 0);
+}
+
+/** 打开弹层。focusSelector 用来指定初始焦点，不传则取第一个可聚焦元素。 */
+function showModal(html, focusSelector) {
   const modal = $('#modal');
+  const prev = document.activeElement;
+  modalReturnFocus = prev && prev !== document.body ? prev : null;
+
   modal.innerHTML = html;
   modal.hidden = false;
+
+  const shell = $('#appScreen');
+  if (shell) shell.inert = true;
+  const auth = $('#authScreen');
+  if (auth) auth.inert = true;
+
   modal.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('click', closeModal));
-  const first = modal.querySelector('input, select, button');
+  const first = (focusSelector && modal.querySelector(focusSelector)) || modal.querySelector(FOCUSABLE_SEL);
   if (first) setTimeout(() => first.focus(), 30);
 }
 
@@ -328,12 +347,42 @@ function invalidateCache(paths) {
 
 function closeModal() {
   const modal = $('#modal');
+  const hadModal = !modal.hidden;
   modal.hidden = true;
   modal.innerHTML = '';
+
+  const shell = $('#appScreen');
+  if (shell) shell.inert = false;
+  const auth = $('#authScreen');
+  if (auth) auth.inert = false;
+
+  // 焦点还回去；触发元素可能已被 render() 重建，所以要判断还在不在文档里
+  const back = modalReturnFocus;
+  modalReturnFocus = null;
+  if (hadModal) {
+    if (back && document.contains(back) && !back.disabled) back.focus();
+    else $('.nav__item.is-active')?.focus();
+  }
 }
 
 $('#modal').addEventListener('click', (e) => {
   if (e.target.id === 'modal') closeModal();
+});
+
+// 弹层内 Tab 循环，不允许跑到背景
+$('#modal').addEventListener('keydown', (e) => {
+  if (e.key !== 'Tab') return;
+  const list = modalFocusables();
+  if (!list.length) return;
+  const first = list[0];
+  const last = list[list.length - 1];
+  if (e.shiftKey && document.activeElement === first) {
+    e.preventDefault();
+    last.focus();
+  } else if (!e.shiftKey && document.activeElement === last) {
+    e.preventDefault();
+    first.focus();
+  }
 });
 
 document.addEventListener('keydown', (e) => {
@@ -502,9 +551,12 @@ async function boot() {
     await Promise.all([loadEntries(), loadStats()]);
     flushOutbox();
   } catch (err) {
-    if (err.message === '未登录') showAuth();
-    else if (looksOffline(err)) showAuth();
-    else showAuth();
+    // 401 才回登录页；其它错误留在界面上说清楚，别把人踢出去
+    if (err.message === '未登录') return showAuth();
+    if (looksOffline(err)) return showAuth();
+    console.error('[boot]', err);
+    showAuth();
+    showAuthError(err.message || '加载失败，刷新一下再试');
   }
 }
 
@@ -526,13 +578,16 @@ function avatarNode(value, name, cls = 'avatar', id = '') {
   const idAttr = id ? ` id="${id}"` : '';
   const v = value || '';
   if (v.startsWith('data:image/')) {
-    return `<span class="${cls} ${cls}--img"${idAttr}><img src="${v}" alt="" loading="lazy" /></span>`;
+    // 额外加一个固定修饰类 av-img：cls 是变的（avatar / profile__avatar），
+    // 只拼 `${cls}--img` 会生成 profile__avatar--img，而 CSS 里没有这条规则，
+    // 图片就按原始尺寸画出来，撑破 46px 的圆框。
+    return `<span class="${cls} ${cls}--img av-img"${idAttr}><img src="${v}" alt="" loading="lazy" /></span>`;
   }
   if (v.startsWith('emoji:')) {
     const key = v.slice(6);
     if (key === 'initial') return `<span class="${cls}"${idAttr}>${label}</span>`;
     const emo = AVATAR_EMOJI_MAP[key];
-    if (emo) return `<span class="${cls} ${cls}--emoji"${idAttr}>${emo}</span>`;
+    if (emo) return `<span class="${cls} ${cls}--emoji av-emoji"${idAttr}>${emo}</span>`;
   }
   return `<span class="${cls}"${idAttr}>${label}</span>`;
 }
@@ -1032,6 +1087,7 @@ function sumOf(list, direction) {
 
 function render() {
   const view = $('#view');
+  document.body.classList.toggle('has-savebar', state.view === 'add');
   if (!view) return;
   try {
     const html = state.view === 'add' ? renderAdd() : state.view === 'list' ? renderList() : state.view === 'stats' ? renderStats() : renderMe();
@@ -1066,21 +1122,15 @@ function renderAdd() {
 
   return `
     <div class="compose">
-      <section class="card compose__left">
+      <section class="card compose__amount">
         <div class="amount">
           <span class="amount__cur">¥</span>
           <span class="amount__value ${cents ? '' : 'is-zero'}" data-fit="${amountFit()}" aria-live="polite">${draftText(d)}</span>
           <button type="button" class="amount__clear" id="clearAmount" aria-label="清空金额" ${cents ? '' : 'hidden'}>清空</button>
         </div>
-        <div class="keypad">
-          ${['1', '2', '3', '4', '5', '6', '7', '8', '9', '.', '0']
-            .map((k) => `<button type="button" class="key" data-key="${k}">${k}</button>`)
-            .join('')}
-          <button type="button" class="key" data-key="del" aria-label="退格">${icon('backspace')}</button>
-        </div>
       </section>
 
-      <section class="card compose__right">
+      <section class="card compose__cats">
         <div class="direction" role="group" aria-label="收支类型">
           <button type="button" data-dir="expense" aria-pressed="${d.direction === 'expense'}">支出</button>
           <button type="button" data-dir="income" aria-pressed="${d.direction === 'income'}">收入</button>
@@ -1098,14 +1148,23 @@ function renderAdd() {
         </div>
 
         <div class="compose__meta">
-          <input class="input" id="draftNote" placeholder="备注（可空）" maxlength="40" value="${escapeAttr(d.note)}" />
-          <input class="input input--date" id="draftDate" type="date" value="${d.date}" />
+          <input class="input" id="draftNote" placeholder="备注（可空）" maxlength="40" value="${escapeAttr(d.note)}" aria-label="备注" />
+          <input class="input input--date" id="draftDate" type="date" value="${d.date}" aria-label="日期" />
         </div>
 
         <div class="chips">
           <button type="button" class="chip" data-date-offset="0">今天</button>
           <button type="button" class="chip" data-date-offset="-1">昨天</button>
           <button type="button" class="chip" data-date-offset="-2">前天</button>
+        </div>
+      </section>
+
+      <section class="card compose__pad">
+        <div class="keypad">
+          ${['1', '2', '3', '4', '5', '6', '7', '8', '9', '.', '0']
+            .map((k) => `<button type="button" class="key" data-key="${k}">${k}</button>`)
+            .join('')}
+          <button type="button" class="key" data-key="del" aria-label="退格">${icon('backspace')}</button>
         </div>
 
         <div class="savebar">
@@ -1117,11 +1176,11 @@ function renderAdd() {
         </div>
       </section>
     </div>
-    ${renderRecent()}
   `;
 }
 
 /* 首页底部：本月最近几笔，没有就提示一句 */
+
 function renderRecent() {
   const list = [...state.entries].sort((a, b) => (a.occurred_on < b.occurred_on ? 1 : -1)).slice(0, 5);
   if (!list.length) {
@@ -2204,132 +2263,272 @@ const AVATAR_PRESETS = [
   ['fish', '🐟'],
 ];
 
+const AVATAR_NAMES = {
+  initial: '名字首字',
+  cat: '小猫',
+  dog: '小狗',
+  fox: '狐狸',
+  bear: '小熊',
+  rabbit: '兔子',
+  panda: '熊猫',
+  fish: '小鱼',
+};
+
 function openProfileEditor() {
   const me = state.me || {};
   const name = me.displayName || me.username || '';
   const current = me.avatar || 'emoji:initial';
 
-  showModal(`
-    <div class="modal__card" role="dialog" aria-modal="true" aria-labelledby="profileTitle">
+  const tiles = AVATAR_PRESETS.map(([key]) => {
+    const value = `emoji:${key}`;
+    const face = key === 'initial' ? avatarNode('emoji:initial', name) : AVATAR_EMOJI_MAP[key];
+    return `<button type="button" class="avatarpick__item" data-avatar="${value}"
+      role="radio" aria-checked="false" tabindex="-1" aria-label="${AVATAR_NAMES[key]}">${face}</button>`;
+  }).join('');
+
+  showModal(
+    `
+    <div class="modal__card" role="dialog" aria-modal="true" aria-labelledby="profileTitle" aria-describedby="profileDesc">
       <h2 class="modal__title" id="profileTitle">改资料</h2>
+      <p class="modal__note" id="profileDesc">改完之后，以前的账目署名也会一起变。</p>
+
       <div class="modal__field">
         <label class="modal__label" for="profileName">怎么称呼你</label>
-        <input class="input" id="profileName" maxlength="10" value="${escapeAttr(name)}" aria-describedby="profileNameHint" />
-        <span class="field__hint" id="profileNameHint">改完之后，以前的账目署名也会一起变。</span>
+        <input class="input" id="profileName" maxlength="10" value="${escapeAttr(name)}"
+          aria-describedby="profileNameErr" autocomplete="nickname" />
+        <span class="field__hint field__hint--err" id="profileNameErr" role="alert" hidden></span>
       </div>
+
       <div class="modal__field">
-        <span class="modal__label">头像</span>
-        <div class="avatarpick" role="radiogroup" aria-label="选择头像">
-          ${AVATAR_PRESETS.map(([key, glyph]) => {
-            const on = current === `emoji:${key}` || (key === 'initial' && current.startsWith('emoji:initial'));
-            return `<button type="button" class="avatarpick__item${on ? ' is-active' : ''}" data-avatar="emoji:${key}" role="radio" aria-checked="${on}" aria-label="${key === 'initial' ? '用名字首字' : key}">${key === 'initial' ? avatarNode('emoji:initial', name) : glyph}</button>`;
-          }).join('')}
-          <button type="button" class="avatarpick__item avatarpick__upload" data-avatar-upload aria-label="上传图片">
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4"/><path d="m7 9 5-5 5 5"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
-          </button>
-        </div>
-        <input type="file" id="avatarFile" accept="image/*" hidden />
-        <p class="modal__meta" id="avatarNote">支持 1MB 以内的图片，会自动裁成方形。</p>
+        <span class="modal__label" id="avatarLabel">头像</span>
+        <div class="avatarpick" role="radiogroup" aria-labelledby="avatarLabel">${tiles}</div>
+        <button type="button" class="btn btn--ghost btn--block avatarpick__upload" data-avatar-upload>
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 16V4"/><path d="m7 9 5-5 5 5"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
+          <span data-upload-label>从相册选一张</span>
+        </button>
+        <input type="file" id="avatarFile" class="fileghost" accept="image/*" tabindex="-1" aria-label="选择头像图片" />
+        <p class="field__hint" id="avatarNote" aria-live="polite">支持 8MB 以内的图片，会自动裁成方形。</p>
       </div>
-      <p class="authform__error" id="profileError" role="alert" hidden></p>
+
       <div class="modal__actions">
         <button type="button" class="btn btn--ghost" data-close>取消</button>
         <button type="button" class="btn btn--primary" id="profileSave">保存</button>
       </div>
     </div>
-  `);
+  `,
+    '#profileName',
+  );
 
-  let picked = current;
   const modal = $('#modal');
+  const tilesAll = [...modal.querySelectorAll('[data-avatar]')];
+  const uploadBtn = modal.querySelector('[data-avatar-upload]');
+  const uploadLabel = modal.querySelector('[data-upload-label]');
+  const note = $('#avatarNote');
+  const fileInput = $('#avatarFile');
+  let picked = current;
 
-  modal.querySelectorAll('[data-avatar]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      picked = btn.dataset.avatar;
-      modal.querySelectorAll('[data-avatar]').forEach((b) => {
-        const on = b === btn;
-        b.classList.toggle('is-active', on);
-        b.setAttribute('aria-checked', String(on));
-      });
+  /** 唯一的选中入口：保证任何时刻恰好一个选中 */
+  function selectAvatar(value) {
+    picked = value;
+    let hitIndex = -1;
+    tilesAll.forEach((tile, i) => {
+      const on = tile.dataset.avatar === value;
+      if (on) hitIndex = i;
+      tile.classList.toggle('is-active', on);
+      tile.setAttribute('aria-checked', String(on));
+      tile.tabIndex = on || (hitIndex < 0 && i === 0 && !value.startsWith('data:image/')) ? 0 : -1;
     });
+
+    const isImage = value.startsWith('data:image/');
+    uploadBtn.classList.toggle('is-active', isImage);
+    uploadBtn.setAttribute('aria-pressed', String(isImage));
+    if (isImage) {
+      uploadBtn.innerHTML = `${avatarNode(value, name, 'avatarpick__thumb')}<span data-upload-label>已选好，点保存生效</span>`;
+    } else {
+      uploadBtn.innerHTML = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 16V4"/><path d="m7 9 5-5 5 5"/><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg><span data-upload-label>从相册选一张</span>`;
+    }
+
+    // roving tabindex：始终保证组里有一个可 Tab 到的位置
+    if (!tilesAll.some((t) => t.tabIndex === 0)) tilesAll[0].tabIndex = 0;
+  }
+
+  selectAvatar(current);
+
+  // 点击选中 + 方向键在组内移动
+  modal.querySelector('.avatarpick').addEventListener('click', (e) => {
+    const tile = e.target.closest('[data-avatar]');
+    if (!tile) return;
+    selectAvatar(tile.dataset.avatar);
+    tile.focus();
   });
 
-  modal.querySelector('[data-avatar-upload]').addEventListener('click', () => $('#avatarFile').click());
+  modal.querySelector('.avatarpick').addEventListener('keydown', (e) => {
+    const keys = ['ArrowRight', 'ArrowLeft', 'ArrowUp', 'ArrowDown', 'Home', 'End'];
+    if (!keys.includes(e.key)) return;
+    const i = tilesAll.indexOf(document.activeElement);
+    if (i < 0) return;
+    e.preventDefault();
+    const n = tilesAll.length;
+    let next = i;
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') next = (i + 1) % n;
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') next = (i - 1 + n) % n;
+    if (e.key === 'Home') next = 0;
+    if (e.key === 'End') next = n - 1;
+    selectAvatar(tilesAll[next].dataset.avatar);
+    tilesAll[next].focus();
+  });
 
-  $('#avatarFile').addEventListener('change', async (e) => {
-    const file = e.target.files && e.target.files[0];
-    if (!file) return;
-    const note = $('#avatarNote');
+  uploadBtn.addEventListener('click', () => {
+    fileInput.value = '';
+    fileInput.click();
+  });
+
+  let handled = null;
+  async function takeFile(file) {
+    if (!file || file === handled) return;
+    handled = file;
     try {
       note.textContent = '正在处理图片…';
-      picked = await compressAvatar(file);
+      const data = await compressAvatar(file);
+      selectAvatar(data);
       note.textContent = '已选好这张，点保存生效。';
-      modal.querySelectorAll('[data-avatar]').forEach((b) => {
-        b.classList.remove('is-active');
-        b.setAttribute('aria-checked', 'false');
-      });
-      modal.querySelector('[data-avatar-upload]').classList.add('is-active');
     } catch (err) {
       note.textContent = err.message || '这张图读不了，换一张试试';
-      picked = current;
+      selectAvatar(current);
+    } finally {
+      fileInput.value = '';
+      handled = null;
     }
+  }
+
+  fileInput.addEventListener('change', (e) => takeFile(e.target.files && e.target.files[0]));
+  // iOS 偶发只派发 input 不派发 change（相册转码/权限恢复后）
+  fileInput.addEventListener('input', (e) => takeFile(e.target.files && e.target.files[0]));
+
+  const nameInput = $('#profileName');
+  const nameErr = $('#profileNameErr');
+
+  nameInput.addEventListener('input', () => {
+    nameErr.hidden = true;
+    nameInput.removeAttribute('aria-invalid');
   });
 
   $('#profileSave').addEventListener('click', async (e) => {
     const btn = e.currentTarget;
-    const errBox = $('#profileError');
-    const newName = $('#profileName').value.trim();
+    const newName = nameInput.value.trim();
     if (newName.length < 1) {
-      errBox.textContent = '称呼至少填 1 个字';
-      errBox.hidden = false;
+      nameErr.textContent = '称呼至少填 1 个字';
+      nameErr.hidden = false;
+      nameInput.setAttribute('aria-invalid', 'true');
+      nameInput.focus();
       return;
     }
     btn.disabled = true;
+    btn.setAttribute('aria-busy', 'true');
     btn.classList.add('is-loading');
     try {
-      await api('PATCH', '/api/me', { displayName: newName, avatar: picked });
+      await api('PATCH', '/api/me', { displayName: newName, avatar: picked })
+        .catch((err) => {
+          // 会话过期：别静默关掉弹层把输入丢掉
+          throw err;
+        });
       invalidateCache(['/api/me']);
       state.me = { ...state.me, displayName: newName, avatar: picked };
+      // 成员列表里「我」那一行也要跟着变，否则三处头像/名字不一致
+      state.members = state.members.map((m) =>
+        String(m.id) === String(state.me.id) ? { ...m, display_name: newName, avatar: picked } : m,
+      );
       closeModal();
       paintShell();
       render();
       toast('改好了');
     } catch (err) {
-      errBox.textContent = err.message || '没保存上，再试一次';
-      errBox.hidden = false;
       btn.disabled = false;
+      btn.removeAttribute('aria-busy');
       btn.classList.remove('is-loading');
+      note.textContent = err.message || '没保存上，再试一次';
+      note.classList.add('is-error');
     }
   });
 }
 
-/** 裁成 160×160 webp，压到 24KB 以内 */
+/** 裁成方形 webp/jpeg，压到 24KB 以内 */
 function compressAvatar(file) {
   return new Promise((resolve, reject) => {
+    if (!file.type.startsWith('image/')) return reject(new Error('只支持图片文件'));
     if (file.size > 8 * 1024 * 1024) return reject(new Error('图片太大了，换一张 8MB 以内的'));
+    if (typeof file.size === 'number' && file.size === 0) return reject(new Error('这个文件是空的'));
+
     const img = new Image();
     const url = URL.createObjectURL(file);
-    img.onload = () => {
-      const side = Math.min(img.width, img.height);
-      const sx = (img.width - side) / 2;
-      const sy = (img.height - side) / 2;
-      const size = 160;
-      const canvas = document.createElement('canvas');
-      canvas.width = size;
-      canvas.height = size;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(img, sx, sy, side, side, 0, 0, size, size);
+    let done = false;
+
+    const fail = (msg) => {
+      if (done) return;
+      done = true;
       URL.revokeObjectURL(url);
-      for (const q of [0.85, 0.7, 0.6, 0.5]) {
-        const data = canvas.toDataURL('image/webp', q);
-        if (data.length <= 24000 || q === 0.5) return resolve(data);
+      reject(new Error(msg));
+    };
+
+    // 看门狗：解码卡住时不要一直转圈
+    const timer = setTimeout(() => fail('这张图读得太久，换一张试试'), 20000);
+
+    img.onload = () => {
+      clearTimeout(timer);
+      if (done) return;
+      if (!img.naturalWidth || !img.naturalHeight) return fail('这张图读不出来，换一张试试');
+      try {
+        const side = Math.min(img.naturalWidth, img.naturalHeight);
+        const sx = (img.naturalWidth - side) / 2;
+        const sy = (img.naturalHeight - side) / 2;
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+
+        // 尺寸与质量逐档降，直到硬约束 24KB 以内
+        for (const size of [160, 128, 96]) {
+          canvas.width = size;
+          canvas.height = size;
+          ctx.drawImage(img, sx, sy, side, side, 0, 0, size, size);
+          for (const type of encoderTypes()) {
+            for (const q of [0.85, 0.7, 0.6, 0.5]) {
+              const data = canvas.toDataURL(type, q);
+              if (!data.startsWith('data:image/')) continue;
+              if (data.length <= 24000) {
+                done = true;
+                URL.revokeObjectURL(url);
+                return resolve(data);
+              }
+            }
+          }
+        }
+        fail('图片压不小，换一张简单点的试试');
+      } catch (err) {
+        fail('这张图处理不了，换一张试试');
       }
     };
+
     img.onerror = () => {
-      URL.revokeObjectURL(url);
-      reject(new Error('这张图格式不支持'));
+      clearTimeout(timer);
+      fail('这个格式不支持，换一张 jpg 或 png');
     };
+
     img.src = url;
   });
+}
+
+let WEBP_OK = null;
+/** Safari 会把 image/webp 悄悄退回 PNG，先探一下 */
+function encoderTypes() {
+  if (WEBP_OK === null) {
+    try {
+      const c = document.createElement('canvas');
+      c.width = c.height = 1;
+      WEBP_OK = c.toDataURL('image/webp').startsWith('data:image/webp');
+    } catch {
+      WEBP_OK = false;
+    }
+  }
+  return WEBP_OK ? ['image/webp', 'image/jpeg'] : ['image/jpeg'];
 }
 
 /* ------------------------------------------------------------ 退出家庭 */
@@ -2337,29 +2536,49 @@ function compressAvatar(file) {
 function openLeaveDialog() {
   const me = state.me || {};
   const isOwner = me.role === 'owner';
-  const multi = state.members.length > 1;
+  const others = state.members.filter((m) => String(m.id) !== String(me.id));
+  const multi = others.length > 0;
+  const myCount = (state.entries || []).filter((e) => String(e.created_by) === String(me.id)).length;
 
   const title = multi ? '退出这个账本？' : '换一个新账本？';
-  const body = multi
-    ? isOwner
-      ? '你是创建者。退出后创建者会转给最早加入的家人，你的账目留在原账本，你之后看不到这些账。'
-      : '退出后你就看不到这个账本里的账目了。你自己的账会跟着你走。'
-    : '这个账本只有你一个人。换新账本时，你的账目和分类会一起搬过去，不会丢。';
 
-  showModal(`
-    <div class="modal__card" role="dialog" aria-modal="true" aria-labelledby="leaveTitle">
+  const lines = [];
+  if (multi && isOwner) {
+    lines.push(
+      `这个账本一共 ${state.members.length} 人。退出后创建者会转给最早加入的「${others[0].display_name}」，账本本身不会消失。`,
+    );
+    lines.push(`你这段时间记的 ${myCount} 笔会留在原账本里，你之后看不到它们。`);
+  } else if (multi) {
+    lines.push(`这个账本还有 ${others.length} 位家人。退出后你就看不到这个账本里的账目了。`);
+    lines.push(`你自己记的账会跟着你走，${others.map((o) => o.display_name).join('、')} 记的你之后看不到了。`);
+  } else {
+    lines.push('这个账本只有你一个人。换新账本时，你的账目、分类和统计会一起搬过去，不会丢。');
+    lines.push('新账本还是叫「我的账本」，你可以随时在「我的」里再换名字。');
+  }
+
+  const confirmText = multi
+    ? '我知道退出后看不到原来那本账了'
+    : '我知道会换成一个新账本';
+
+  showModal(
+    `
+    <div class="modal__card" role="dialog" aria-modal="true" aria-labelledby="leaveTitle" aria-describedby="leaveDesc">
       <h2 class="modal__title" id="leaveTitle">${title}</h2>
-      <p class="modal__note">${body}</p>
+      <div class="modal__note" id="leaveDesc">
+        ${lines.map((l) => `<p>${l}</p>`).join('')}
+      </div>
       <label class="checkrow">
         <input type="checkbox" id="leaveConfirm" />
-        <span>我知道退出后就看不到原来那本账了</span>
+        <span>${confirmText}</span>
       </label>
       <div class="modal__actions">
         <button type="button" class="btn btn--ghost" data-close id="leaveCancel">再想想</button>
         <button type="button" class="btn btn--danger" id="leaveDo" disabled>确认退出</button>
       </div>
     </div>
-  `);
+  `,
+    '#leaveCancel',
+  );
 
   const check = $('#leaveConfirm');
   const doBtn = $('#leaveDo');
@@ -2369,6 +2588,7 @@ function openLeaveDialog() {
 
   doBtn.addEventListener('click', async () => {
     doBtn.disabled = true;
+    doBtn.setAttribute('aria-busy', 'true');
     doBtn.classList.add('is-loading');
     try {
       await api('POST', '/api/household/leave', { confirm: true });
@@ -2380,12 +2600,11 @@ function openLeaveDialog() {
       await boot();
     } catch (err) {
       doBtn.disabled = false;
+      doBtn.removeAttribute('aria-busy');
       doBtn.classList.remove('is-loading');
       toast(err.message || '退出失败');
     }
   });
-
-  setTimeout(() => $('#leaveCancel')?.focus(), 30);
 }
 
 /* ------------------------------------------------------------ 实体键盘 */

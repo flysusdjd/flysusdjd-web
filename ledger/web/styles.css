@@ -785,14 +785,16 @@ svg {
 }
 
 @media (min-width: 861px) {
+  /* 三块各自按内容高，左右两列顶部对齐；之前强制的 434px 会把金额卡拉出一大片空白 */
   .compose > .card {
     display: flex;
     flex-direction: column;
-    min-height: 434px;
+    min-height: 0;
+    align-self: start;
   }
 
-  .compose__left .keypad {
-    margin-top: auto;
+  .compose__pad .keypad {
+    margin-top: 0;
   }
 }
 
@@ -2799,24 +2801,221 @@ textarea:focus-visible {
 
 /* 头像三种形态 */
 .avatar--img,
-.profile__avatar.avatar--img {
+.av-img {
+  display: block; /* 不用 grid 居中：img 的 100% 需要一个确定的参照盒 */
   padding: 0;
-  overflow: hidden;
+  overflow: hidden; /* 配合 border-radius:50% 把方图裁进圆框 */
   background: var(--surface-2);
 }
 
-.avatar--img img {
+.avatar--img img,
+.av-img img {
+  display: block;
   width: 100%;
   height: 100%;
   object-fit: cover;
-  display: block;
+  object-position: center;
 }
 
 .avatar--emoji,
-.profile__avatar.avatar--emoji {
+.av-emoji {
   font-size: 17px;
 }
 
-.profile__avatar.avatar--emoji {
+.profile__avatar.avatar--emoji,
+.profile__avatar.av-emoji {
   font-size: 22px;
+}
+
+/* 视觉隐藏但仍在文档里并可点：iOS 对 display:none 的 file input 唤不起相册 */
+.fileghost {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  border: 0;
+  padding: 0;
+  opacity: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  pointer-events: none;
+}
+
+/* ---------- 第二轮修复：对话框可达性与头像选择器 ---------- */
+
+/* 弹层在小屏/横屏下可滚动，保存按钮永远够得到 */
+.modal__card {
+  max-height: calc(100dvh - 16px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+@media (max-width: 560px) {
+  .modal__card {
+    max-height: calc(100dvh - 8px);
+  }
+}
+
+/* 危险按钮的禁用态要和启用态明显不同 */
+.btn--danger:disabled,
+.btn--primary:disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
+  filter: grayscale(0.15);
+}
+
+/* 输入框焦点环对比度不足（原来 1.28–1.46:1），改用实心描边 */
+.input:focus-visible,
+.field__box input:focus-visible,
+.field__box select:focus-visible,
+.searchbox input:focus-visible,
+.select:focus-visible {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: 1px;
+}
+
+/* 头像 tile 边框对比度 1.19:1 → 用 --line-strong，选中时更明确 */
+.avatarpick {
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
+.avatarpick__item {
+  aspect-ratio: 1;
+  height: auto;
+  border-color: var(--line-strong);
+  border-radius: 14px;
+}
+
+.avatarpick__item.is-active {
+  border-color: var(--accent-strong);
+  box-shadow: 0 0 0 2px var(--accent-line);
+}
+
+.avatarpick__item:focus-visible {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: 2px;
+}
+
+/* 上传改成整行按钮，不再和 8 个格子抢网格 */
+.avatarpick__upload {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 10px;
+  height: 44px;
+  font-size: 13.5px;
+  color: var(--text-2);
+}
+
+.avatarpick__upload.is-active {
+  border-color: var(--accent-strong);
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.avatarpick__thumb {
+  display: block;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  overflow: hidden;
+  flex: none;
+}
+
+.avatarpick__thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* 字段级错误提示 */
+.field__hint--err,
+.field__hint.is-error {
+  color: var(--danger);
+}
+
+.modal__note p + p {
+  margin-top: 8px;
+}
+
+/* toast 不要压住手机底部的保存条 */
+.savebar ~ #toast,
+body.has-savebar #toast {
+  bottom: calc(var(--tabbar-h) + 78px + env(safe-area-inset-bottom, 0px)) !important;
+}
+
+/* ---------- 记一笔：三段式布局（金额 / 分类 / 键盘） ---------- */
+.compose {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-areas:
+    "amount cats"
+    "pad    cats";
+  grid-template-rows: auto 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+.compose__amount {
+  grid-area: amount;
+}
+
+.compose__cats {
+  grid-area: cats;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.compose__pad {
+  grid-area: pad;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.compose__cats .catgrid {
+  margin: 0;
+}
+
+.compose__cats .compose__meta,
+.compose__cats .chips {
+  margin: 0;
+}
+
+@media (max-width: 860px) {
+  /* 手机：金额 → 分类 → 键盘，分类不再被键盘挤到屏幕外 */
+  .compose {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "amount"
+      "pad"
+      "cats";
+    grid-template-rows: auto auto auto;
+    gap: 12px;
+  }
+
+  .compose__pad .keypad {
+    margin: 0;
+  }
+}
+
+@media (max-width: 560px) {
+  .keypad {
+    gap: 6px;
+  }
+
+  .key {
+    height: 46px;
+    font-size: 17px;
+  }
+}
+
+@media (max-width: 560px) {
+  /* 手机上键盘改成 4 列 3 行：数字区更矮，分类能早一点露出来 */
+  .compose__pad .keypad {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
 }
