@@ -206,6 +206,11 @@ async function api(method, path, body) {
 const state = {
   view: 'add',
   month: monthStr(),
+  range: { kind: 'month', month: monthStr() },
+  scrollMap: new Map(),
+  bin: [],
+  binLoading: false,
+  highlightId: null,
   scope: 'all', // all | me | <memberId>
   me: null,
   members: [],
@@ -249,7 +254,15 @@ function toast(message, action) {
     el.appendChild(btn);
   }
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(hideToast, action ? 6000 : 2600);
+  const arms = () => {
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(hideToast, action ? 5000 : 2600);
+  };
+  el.onmouseenter = () => clearTimeout(toastTimer);
+  el.onmouseleave = arms;
+  el.onfocusin = () => clearTimeout(toastTimer);
+  el.onfocusout = arms;
+  arms();
 }
 
 function hideToast() {
@@ -448,7 +461,7 @@ function paintShell() {
   $('#sideAvatar').textContent = name.slice(0, 1);
   const isOwner = state.me?.role === 'owner';
   $('#sideRole').textContent = isOwner ? '账本创建者' : '家庭成员';
-  $('#monthLabel').textContent = fmtMonthCN(state.month);
+  $('#monthLabel').textContent = fmtRangeCN(state.range);
   paintScope();
 }
 
@@ -466,38 +479,298 @@ function paintScope() {
 /* ================================================================== 导航 */
 
 function setView(name, { silent = false } = {}) {
+  if (!silent && name !== state.view) state.scrollMap.set(state.view, window.scrollY);
   state.view = name;
+  if (name === 'me' && !state.binLoading && !state.bin.length) loadBin();
   $$('.nav__item').forEach((b) => {
     const on = b.dataset.view === name;
     b.classList.toggle('is-active', on);
     b.setAttribute('aria-selected', String(on));
   });
-  if (!silent) window.scrollTo({ top: 0, behavior: 'smooth' });
   render();
+  const y = silent ? 0 : (state.scrollMap.get(name) ?? 0);
+  window.scrollTo({ top: y, behavior: 'auto' });
+  const v = $('#view');
+  if (v && !silent) {
+    v.classList.remove('view-enter');
+    void v.offsetWidth;
+    v.classList.add('view-enter');
+  }
 }
 
 $$('.nav__item').forEach((btn) => btn.addEventListener('click', () => setView(btn.dataset.view)));
 $('#sideUser').addEventListener('click', () => setView('me'));
 
-$('#monthPrev').addEventListener('click', () => shiftMonth(-1));
-$('#monthNext').addEventListener('click', () => shiftMonth(1));
-$('#monthLabel').addEventListener('click', () => {
-  state.month = monthStr();
-  $('#monthLabel').textContent = fmtMonthCN(state.month);
-  loadEntries();
-  loadStats();
-  render();
-});
+/* ============================================================ 日期范围 */
 
-function shiftMonth(delta) {
-  const [y, m] = state.month.split('-').map(Number);
-  const d = new Date(y, m - 1 + delta, 1);
-  state.month = `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
-  $('#monthLabel').textContent = fmtMonthCN(state.month);
+/** 把 range 渲染成顶部那行字：2026 年 11 月 / 11 月 1 日 – 11 月 7 日 */
+function fmtRangeCN(r) {
+  if (!r || r.kind === 'month') return fmtMonthCN(r?.month || state.month);
+  const md = (d) => `${Number(d.slice(5, 7))} 月 ${Number(d.slice(8, 10))} 日`;
+  if (r.from === r.to) return md(r.from);
+  return `${md(r.from)} – ${md(r.to)}`;
+}
+
+function queryFor() {
+  const q = new URLSearchParams({ member: state.scope });
+  if (state.range.kind === 'range') {
+    q.set('from', state.range.from);
+    q.set('to', state.range.to);
+  } else {
+    q.set('month', state.range.month);
+  }
+  return q;
+}
+
+function setRange(r) {
+  state.range = r;
+  if (r.kind === 'month') state.month = r.month;
+  paintShell();
   loadEntries();
   loadStats();
   render();
 }
+
+$('#monthPrev').addEventListener('click', () => shiftMonth(-1));
+$('#monthNext').addEventListener('click', () => shiftMonth(1));
+
+/** 左右箭头永远按「整月」移动；自定义区间会被重置成整月 */
+function shiftMonth(delta) {
+  const base = state.range.kind === 'month' ? state.range.month : (state.range.from || monthStr()).slice(0, 7);
+  const [y, m] = base.split('-').map(Number);
+  const d = new Date(y, m - 1 + delta, 1);
+  setRange({ kind: 'month', month: `${d.getFullYear()}-${pad(d.getMonth() + 1)}` });
+}
+
+/* ------------------------------------------------------------ 日期面板 */
+
+const pick = { mode: 'days', month: monthStr(), start: null, end: null };
+const pad2 = (n) => String(n).padStart(2, '0');
+const ymdOf = (y, m, d) => `${y}-${pad2(m)}-${pad2(d)}`;
+const todayYmd = () => {
+  const d = new Date();
+  return ymdOf(d.getFullYear(), d.getMonth() + 1, d.getDate());
+};
+const shiftYmd = (ymd, days) => {
+  const [y, m, d] = ymd.split('-').map(Number);
+  const t = new Date(y, m - 1, d + days);
+  return ymdOf(t.getFullYear(), t.getMonth() + 1, t.getDate());
+};
+
+const PRESETS = [
+  { key: 'thisMonth', label: '本月' },
+  { key: 'lastMonth', label: '上月' },
+  { key: 'last7', label: '近 7 天' },
+  { key: 'last30', label: '近 30 天' },
+  { key: 'thisYear', label: '今年' },
+  { key: 'all', label: '全部' },
+];
+
+function presetRange(key) {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = now.getMonth() + 1;
+  const today = todayYmd();
+  if (key === 'thisMonth') return { kind: 'month', month: `${y}-${pad2(m)}` };
+  if (key === 'lastMonth') {
+    const d = new Date(y, m - 2, 1);
+    return { kind: 'month', month: `${d.getFullYear()}-${pad2(d.getMonth() + 1)}` };
+  }
+  if (key === 'last7') return { kind: 'range', from: shiftYmd(today, -6), to: today };
+  if (key === 'last30') return { kind: 'range', from: shiftYmd(today, -29), to: today };
+  if (key === 'thisYear') return { kind: 'range', from: `${y}-01-01`, to: today };
+  if (key === 'all') return { kind: 'range', from: '2000-01-01', to: today };
+  return { kind: 'month', month: `${y}-${pad2(m)}` };
+}
+
+function popEl() {
+  return $('#pop');
+}
+
+function openPick() {
+  const r = state.range;
+  pick.mode = 'days';
+  pick.month = r.kind === 'month' ? r.month : (r.from || monthStr()).slice(0, 7);
+  pick.start = r.kind === 'range' ? r.from : null;
+  pick.end = r.kind === 'range' ? r.to : null;
+  renderPick();
+  const pop = popEl();
+  $('#popBack').hidden = false;
+  pop.hidden = false;
+  pop.classList.toggle('is-sheet', window.innerWidth <= 860);
+  if (window.innerWidth > 860) {
+    const rect = $('#monthLabel').getBoundingClientRect();
+    pop.style.left = `${Math.max(12, Math.min(rect.left, window.innerWidth - 380))}px`;
+    pop.style.top = `${rect.bottom + 8}px`;
+  } else {
+    pop.style.left = '';
+    pop.style.top = 'auto';
+  }
+  $('#monthLabel').setAttribute('aria-expanded', 'true');
+  requestAnimationFrame(() => pop.classList.add('is-open'));
+  const seed = pick.start || todayYmd();
+  const target = pop.querySelector(`.cal__day[data-day="${seed}"]`) || pop.querySelector('.pop__title');
+  target?.focus?.();
+}
+
+function closePick({ restoreFocus = true } = {}) {
+  const pop = popEl();
+  pop.classList.remove('is-open');
+  pop.hidden = true;
+  $('#popBack').hidden = true;
+  $('#monthLabel').setAttribute('aria-expanded', 'false');
+  if (restoreFocus) $('#monthLabel').focus();
+}
+
+function applyPickRange(from, to) {
+  if (!from || !to) return;
+  const [a, b] = from <= to ? [from, to] : [to, from];
+  closePick();
+  setRange({ kind: 'range', from: a, to: b });
+}
+
+function renderPick() {
+  const pop = popEl();
+  const [y, m] = pick.month.split('-').map(Number);
+  const title = pick.mode === 'days' ? `${y} 年 ${m} 月` : `${y} 年`;
+
+  let body = '';
+  if (pick.mode === 'days') {
+    const first = new Date(y, m - 1, 1);
+    const offset = first.getDay();
+    const days = new Date(y, m, 0).getDate();
+    const prevDays = new Date(y, m - 1, 0).getDate();
+    const cells = [];
+    for (let i = offset - 1; i >= 0; i -= 1) {
+      cells.push(`<span class="cal__day is-out">${prevDays - i}</span>`);
+    }
+    for (let d = 1; d <= days; d += 1) {
+      const day = ymdOf(y, m, d);
+      const isStart = day === pick.start;
+      const isEnd = day === pick.end;
+      const inRange = pick.start && pick.end && day >= pick.start && day <= pick.end;
+      const isToday = day === todayYmd();
+      const cls = ['cal__day', isStart || isEnd ? 'is-edge' : '', inRange ? 'is-in' : '', isToday ? 'is-today' : '']
+        .filter(Boolean)
+        .join(' ');
+      const tab = isStart || (!pick.start && isToday) ? 0 : -1;
+      cells.push(`<button type="button" class="${cls}" data-day="${day}" tabindex="${tab}">${d}</button>`);
+    }
+    const tail = (7 - ((offset + days) % 7)) % 7;
+    for (let i = 1; i <= tail; i += 1) cells.push(`<span class="cal__day is-out">${i}</span>`);
+
+    body = `
+      <div class="cal__dow">${['日', '一', '二', '三', '四', '五', '六'].map((d) => `<span>${d}</span>`).join('')}</div>
+      <div class="cal__grid">${cells.join('')}</div>`;
+  } else {
+    body = `<div class="cal__months">${Array.from({ length: 12 }, (_, i) => i + 1)
+      .map((mm) => {
+        const ym = `${y}-${pad2(mm)}`;
+        const on = state.range.kind === 'month' && state.range.month === ym;
+        return `<button type="button" class="cal__mon${on ? ' is-on' : ''}" data-ym="${ym}">${mm} 月</button>`;
+      })
+      .join('')}</div>`;
+  }
+
+  const selText =
+    pick.start && pick.end
+      ? fmtRangeCN({ kind: 'range', from: pick.start, to: pick.end })
+      : pick.start
+        ? `${fmtRangeCN({ kind: 'range', from: pick.start, to: pick.start })} · 再点一天作为结束`
+        : '点一天作为开始';
+
+  pop.innerHTML = `
+    <div class="pop__head">
+      <button type="button" class="iconbtn" data-nav="-1" aria-label="上一${pick.mode === 'days' ? '个月' : '年'}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.5 6.5 8.5 12l6 5.5" /></svg>
+      </button>
+      <button type="button" class="pop__title" id="pickTitle" aria-label="切换年视图">${title}</button>
+      <button type="button" class="iconbtn" data-nav="1" aria-label="下一${pick.mode === 'days' ? '个月' : '年'}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.5 6.5 15.5 12l-6 5.5" /></svg>
+      </button>
+    </div>
+    <div class="pop__presets">
+      ${PRESETS.map((p) => `<button type="button" class="chip" data-preset="${p.key}">${p.label}</button>`).join('')}
+    </div>
+    ${body}
+    <div class="pop__foot">
+      <span class="pop__sel">${selText}</span>
+      <button type="button" class="btn btn--ghost btn--sm" data-close>取消</button>
+    </div>`;
+}
+
+popEl().addEventListener('click', (ev) => {
+  const t = ev.target.closest('button');
+  if (!t) return;
+  if (t.dataset.close !== undefined) return closePick();
+  if (t.dataset.nav) {
+    const step = Number(t.dataset.nav);
+    if (pick.mode === 'days') {
+      const [py, pm] = pick.month.split('-').map(Number);
+      const d = new Date(py, pm - 1 + step, 1);
+      pick.month = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
+    } else {
+      const [py] = pick.month.split('-').map(Number);
+      pick.month = `${py + step}-01`;
+    }
+    return renderPick();
+  }
+  if (t.id === 'pickTitle') {
+    pick.mode = pick.mode === 'days' ? 'months' : 'days';
+    return renderPick();
+  }
+  if (t.dataset.preset) {
+    closePick();
+    return setRange(presetRange(t.dataset.preset));
+  }
+  if (t.dataset.ym) {
+    pick.mode = 'days';
+    pick.month = t.dataset.ym;
+    return renderPick();
+  }
+  if (t.dataset.day) {
+    const day = t.dataset.day;
+    if (!pick.start || (pick.start && pick.end)) {
+      pick.start = day;
+      pick.end = null;
+      renderPick();
+      popEl().querySelector(`.cal__day[data-day="${day}"]`)?.focus();
+    } else if (day < pick.start) {
+      pick.end = pick.start;
+      pick.start = day;
+      applyPickRange(pick.start, pick.end);
+    } else {
+      pick.end = day;
+      applyPickRange(pick.start, pick.end);
+    }
+  }
+});
+
+popEl().addEventListener('keydown', (ev) => {
+  if (ev.key === 'Escape') {
+    ev.preventDefault();
+    closePick();
+    return;
+  }
+  if (pick.mode !== 'days') return;
+  const cur = document.activeElement;
+  if (!cur || !cur.dataset || !cur.dataset.day) return;
+  const map = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -7, ArrowDown: 7 };
+  if (!(ev.key in map)) return;
+  ev.preventDefault();
+  const nextDay = shiftYmd(cur.dataset.day, map[ev.key]);
+  if (nextDay.slice(0, 7) !== pick.month) {
+    pick.month = nextDay.slice(0, 7);
+    renderPick();
+  }
+  popEl().querySelector(`.cal__day[data-day="${nextDay}"]`)?.focus();
+});
+
+$('#monthLabel').addEventListener('click', () => {
+  if (popEl().hidden) openPick();
+  else closePick();
+});
+$('#popBack').addEventListener('click', () => closePick());
 
 $('#scopeToggle').addEventListener('click', () => {
   state.scope = state.scope === 'all' ? 'me' : 'all';
@@ -514,8 +787,7 @@ async function loadEntries() {
   state.listError = '';
   render();
   try {
-    const q = new URLSearchParams({ month: state.month, member: state.scope });
-    const data = await api('GET', `/api/entries?${q}`);
+    const data = await api('GET', `/api/entries?${queryFor()}`);
     state.entries = data.entries || [];
   } catch (err) {
     state.listError = looksOffline(err) ? '网络不通，显示的是上次的数据' : err.message;
@@ -528,8 +800,7 @@ async function loadEntries() {
 async function loadStats() {
   state.statsLoading = true;
   try {
-    const q = new URLSearchParams({ month: state.month, member: state.scope });
-    state.stats = await api('GET', `/api/stats?${q}`);
+    state.stats = await api('GET', `/api/stats?${queryFor()}`);
   } catch {
     state.stats = null;
   } finally {
@@ -632,7 +903,7 @@ function renderAdd() {
         </div>
 
         <div class="savebar">
-          <button type="button" class="btn btn--primary btn--block" id="saveEntry" ${canSave && !state.saving ? '' : 'disabled'}>
+          <button type="button" class="btn btn--primary btn--block${canSave ? '' : ' is-blocked'}" id="saveEntry" ${state.saving ? 'disabled aria-busy="true"' : ''}>
             <span class="btn__label">${d.direction === 'expense' ? '记下这笔支出' : '记下这笔收入'}</span>
             <span class="btn__spinner" aria-hidden="true"></span>
           </button>
@@ -683,6 +954,9 @@ function renderList() {
   const income = sumOf(rows, 'income');
   const balance = income - expense;
 
+  const isMonthRange = state.range.kind === 'month';
+  const periodLabel = isMonthRange ? '本月' : '区间';
+
   const memberOptions = [
     { value: 'all', label: '全家' },
     { value: 'me', label: '只看我' },
@@ -696,17 +970,17 @@ function renderList() {
   return `
     <div class="summary">
       <button type="button" class="summary__cell" data-jump="expense">
-        <span class="summary__label">本月支出</span>
+        <span class="summary__label">${periodLabel}支出</span>
         <span class="summary__value">${fmtMoney(expense)}</span>
         <span class="summary__hint">${rows.filter((e) => e.direction === 'expense').length} 笔</span>
       </button>
       <button type="button" class="summary__cell" data-jump="income">
-        <span class="summary__label">本月收入</span>
+        <span class="summary__label">${periodLabel}收入</span>
         <span class="summary__value summary__value--income">${fmtMoney(income)}</span>
         <span class="summary__hint">${rows.filter((e) => e.direction === 'income').length} 笔</span>
       </button>
       <button type="button" class="summary__cell" data-jump="stats">
-        <span class="summary__label">本月结余</span>
+        <span class="summary__label">${periodLabel}结余</span>
         <span class="summary__value summary__value--muted">${fmtMoney(balance, { sign: true })}</span>
         <span class="summary__hint">收入 − 支出</span>
       </button>
@@ -790,7 +1064,7 @@ function groupRows(rows) {
         <div class="rows">
           ${list
             .map(
-              (e) => `<button type="button" class="row" data-entry="${e.id}">
+              (e) => `<button type="button" class="row${String(e.id) === String(state.highlightId) ? ' is-new' : ''}" data-entry="${e.id}">
                 <span class="row__icon ${e.direction === 'income' ? 'row__icon--income' : ''}">${catIcon(e.category_name)}</span>
                 <span class="row__main">
                   <span class="row__title">${escapeAttr(e.note || e.category_name)}</span>
@@ -1005,6 +1279,30 @@ function renderMe() {
       <p class="panel__desc">退出后需要重新输入用户名和密码，账目不会丢。</p>
       <button type="button" class="btn btn--ghost btn--sm" id="logoutBtn">退出登录</button>
     </div>
+
+    <div class="panel">
+      <div class="panel__title">回收站 <span class="muted">${state.bin.length ? `${state.bin.length} 条` : ''}</span></div>
+      <p class="panel__desc">删掉的账会留在这里，想恢复随时点一下。</p>
+      ${
+        state.binLoading
+          ? '<p class="hint">正在读回收站…</p>'
+          : state.bin.length
+            ? `<div class="binlist">${state.bin
+                .map(
+                  (e) => `<div class="binrow">
+                    <span class="row__icon">${catIcon(e.category_name)}</span>
+                    <span class="binrow__main">
+                      <span class="row__title">${escapeAttr(e.note || e.category_name)}</span>
+                      <span class="row__sub">${escapeAttr(e.occurred_on)} · ${escapeAttr(e.author_name || '')}</span>
+                    </span>
+                    <span class="row__amount">−${fmtMoney(e.amount_cents, { symbol: false })}</span>
+                    <button type="button" class="btn btn--ghost btn--sm" data-restore="${e.id}">恢复</button>
+                  </div>`,
+                )
+                .join('')}</div>`
+            : '<p class="hint">回收站是空的。</p>'
+      }
+    </div>
   `;
 }
 
@@ -1054,6 +1352,22 @@ function bindView() {
   });
   const saveBtn = $('#saveEntry', view);
   if (saveBtn) saveBtn.addEventListener('click', saveDraft);
+
+  $$('[data-restore]', view).forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      try {
+        await api('POST', `/api/entries/${btn.dataset.restore}/restore`);
+        toast('已恢复');
+        loadBin();
+        loadEntries();
+        loadStats();
+      } catch (err) {
+        btn.disabled = false;
+        toast(err.message || '恢复失败');
+      }
+    });
+  });
 
   /* 明细 */
   const search = $('#searchInput', view);
@@ -1177,11 +1491,11 @@ async function saveDraft() {
   if (state.saving) return;
   const d = state.draft;
   if (!d.cents) {
-    toast('先输入金额');
+    markSaveError('金额要大于 0，先按上面的数字键');
     return;
   }
   if (!d.categoryId) {
-    toast('选一个分类');
+    markSaveError('选一个分类再保存');
     return;
   }
 
@@ -1209,6 +1523,12 @@ async function saveDraft() {
     state.draft.cents = 0;
     state.draft.note = '';
     state.saving = false;
+    state.highlightId = entry.id || null;
+    setTimeout(() => {
+      if (state.highlightId === (entry.id || null)) {
+        state.highlightId = null;
+      }
+    }, 1600);
     render();
     loadEntries();
     loadStats();
@@ -1241,6 +1561,37 @@ async function saveDraft() {
       render();
       toast(err.message || '保存失败，再试一次');
     }
+  }
+}
+
+/* -------------------------------------------------------- 保存的错误提示 */
+
+function markSaveError(msg) {
+  const note = $('#saveNote');
+  if (note) {
+    note.textContent = msg;
+    note.classList.add('is-error');
+  }
+  const amount = document.querySelector('.amount');
+  amount?.classList.remove('is-shake');
+  if (amount) {
+    void amount.offsetWidth;
+    amount.classList.add('is-shake');
+  }
+}
+
+/** 取回收站列表 */
+async function loadBin() {
+  state.binLoading = true;
+  if (state.view === 'me') render();
+  try {
+    const data = await api('GET', '/api/entries/deleted');
+    state.bin = data.entries || [];
+  } catch {
+    state.bin = [];
+  } finally {
+    state.binLoading = false;
+    if (state.view === 'me') render();
   }
 }
 

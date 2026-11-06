@@ -262,10 +262,33 @@ function memberClause(scope, user) {
   return { sql: ' AND created_by = ?', params: [String(scope)] };
 }
 
+/**
+ * 日期范围：优先 from/to（YYYY-MM-DD），否则退回 month（YYYY-MM）。
+ * Date range: use from/to when both are valid dates, otherwise fall back to month.
+ */
+function rangeClause(url) {
+  const from = url.searchParams.get('from');
+  const to = url.searchParams.get('to');
+  if (from && to && isDate(from) && isDate(to) && from <= to) {
+    return {
+      sql: ' AND occurred_on BETWEEN ? AND ?',
+      params: [from, to],
+      range: { kind: 'range', from, to },
+    };
+  }
+  const month = url.searchParams.get('month') || new Date().toISOString().slice(0, 7);
+  if (!isMonth(month)) return null;
+  return {
+    sql: ' AND occurred_on LIKE ?',
+    params: [`${month}-%`],
+    range: { kind: 'month', month },
+  };
+}
+
 async function listEntries(request, env, user) {
   const url = new URL(request.url);
-  const month = url.searchParams.get('month') || new Date().toISOString().slice(0, 7);
-  if (!isMonth(month)) return bad('月份格式应为 YYYY-MM');
+  const r = rangeClause(url);
+  if (!r) return bad('日期范围不对 / Bad date range');
   const scope = url.searchParams.get('member') || 'all';
   const q = (url.searchParams.get('q') || '').trim();
 
@@ -276,8 +299,8 @@ async function listEntries(request, env, user) {
                FROM entries e
                JOIN users u ON u.id = e.created_by
                LEFT JOIN categories c ON c.id = e.category_id
-              WHERE e.household_id = ? AND e.deleted_at IS NULL AND e.occurred_on LIKE ?${m.sql}`;
-  const params = [user.householdId, `${month}-%`, ...m.params];
+              WHERE e.household_id = ? AND e.deleted_at IS NULL${r.sql}${m.sql}`;
+  const params = [user.householdId, ...r.params, ...m.params];
   if (q) {
     sql += ' AND (e.note LIKE ? OR c.name LIKE ?)';
     params.push(`%${q}%`, `%${q}%`);
@@ -285,7 +308,7 @@ async function listEntries(request, env, user) {
   sql += ' ORDER BY e.occurred_on DESC, e.created_at DESC LIMIT 500';
 
   const rows = await env.DB.prepare(sql).bind(...params).all();
-  return ok({ entries: rows.results ?? [], month, scope });
+  return ok({ entries: rows.results ?? [], range: r.range, month: r.range.month, scope });
 }
 
 async function createEntry(request, env, user) {
@@ -409,16 +432,17 @@ async function listDeleted(env, user) {
 
 async function stats(request, env, user) {
   const url = new URL(request.url);
-  const month = url.searchParams.get('month') || new Date().toISOString().slice(0, 7);
-  if (!isMonth(month)) return bad('月份格式应为 YYYY-MM');
+  const r = rangeClause(url);
+  if (!r) return bad('日期范围不对 / Bad date range');
   const scope = url.searchParams.get('member') || 'all';
   const m = memberClause(scope, user);
-  const params = [user.householdId, `${month}-%`, ...m.params];
+  const params = [user.householdId, ...r.params, ...m.params];
+  const rangeParams = [user.householdId, ...r.params];
 
   const totals = await env.DB.prepare(
     `SELECT direction, SUM(amount_cents) AS cents, COUNT(*) AS n
        FROM entries
-      WHERE household_id = ? AND deleted_at IS NULL AND occurred_on LIKE ?${m.sql}
+      WHERE household_id = ? AND deleted_at IS NULL${r.sql}${m.sql}
       GROUP BY direction`,
   )
     .bind(...params)
@@ -427,7 +451,7 @@ async function stats(request, env, user) {
   const byCategory = await env.DB.prepare(
     `SELECT c.id, c.name, c.emoji, e.direction, SUM(e.amount_cents) AS cents, COUNT(*) AS n
        FROM entries e LEFT JOIN categories c ON c.id = e.category_id
-      WHERE e.household_id = ? AND e.deleted_at IS NULL AND e.occurred_on LIKE ?${m.sql}
+      WHERE e.household_id = ? AND e.deleted_at IS NULL${r.sql}${m.sql}
       GROUP BY c.id, e.direction ORDER BY cents DESC`,
   )
     .bind(...params)
@@ -436,16 +460,16 @@ async function stats(request, env, user) {
   const byMember = await env.DB.prepare(
     `SELECT u.id, u.display_name, e.direction, SUM(e.amount_cents) AS cents
        FROM entries e JOIN users u ON u.id = e.created_by
-      WHERE e.household_id = ? AND e.deleted_at IS NULL AND e.occurred_on LIKE ?
+      WHERE e.household_id = ? AND e.deleted_at IS NULL${r.sql}
       GROUP BY u.id, e.direction`,
   )
-    .bind(user.householdId, `${month}-%`)
+    .bind(...rangeParams)
     .all();
 
   const byDay = await env.DB.prepare(
     `SELECT occurred_on AS day, direction, SUM(amount_cents) AS cents
        FROM entries
-      WHERE household_id = ? AND deleted_at IS NULL AND occurred_on LIKE ?${m.sql}
+      WHERE household_id = ? AND deleted_at IS NULL${r.sql}${m.sql}
       GROUP BY occurred_on, direction ORDER BY occurred_on`,
   )
     .bind(...params)
@@ -457,7 +481,8 @@ async function stats(request, env, user) {
   const income = pick(t, 'income');
 
   return ok({
-    month,
+    range: r.range,
+    month: r.range.month,
     scope,
     total: { expense, income, balance: income - expense },
     byCategory: byCategory.results ?? [],

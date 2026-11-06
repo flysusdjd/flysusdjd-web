@@ -195,7 +195,7 @@
             <button type="button" class="iconbtn" id="monthPrev" aria-label="上个月">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.5 6.5 8.5 12l6 5.5" /></svg>
             </button>
-            <button type="button" class="months__label" id="monthLabel" title="回到本月">2026 年 11 月</button>
+            <button type="button" class="months__label" id="monthLabel" title="选择日期范围" aria-haspopup="dialog" aria-expanded="false">2026 年 11 月</button>
             <button type="button" class="iconbtn" id="monthNext" aria-label="下个月">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.5 6.5 15.5 12l-6 5.5" /></svg>
             </button>
@@ -208,6 +208,9 @@
             </button>
           </div>
         </header>
+
+        <div class="pop" id="pop" hidden></div>
+        <div class="popback" id="popBack" hidden></div>
 
         <main class="view" id="view"></main>
       </div>

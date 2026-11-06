@@ -31,8 +31,8 @@
   --r-md: 14px;
   --r-lg: 18px;
   --r-xl: 24px;
-  --sh-1: 0 1px 2px rgba(38, 30, 24, 0.04), 0 10px 24px -22px rgba(38, 30, 24, 0.5);
-  --sh-2: 0 2px 6px rgba(38, 30, 24, 0.05), 0 18px 40px -30px rgba(38, 30, 24, 0.55);
+  --sh-1: 0 1px 2px rgba(34, 29, 25, 0.04), 0 8px 24px -12px rgba(34, 29, 25, 0.12);
+  --sh-2: 0 2px 8px rgba(34, 29, 25, 0.06), 0 24px 48px -32px rgba(34, 29, 25, 0.22);
   --nav-w: 224px;
   --tabbar-h: 62px;
 
@@ -143,7 +143,7 @@ svg {
   width: 100%;
   max-width: 1000px;
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 45fr 55fr;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--r-xl);
@@ -1917,4 +1917,423 @@ button.summary__cell:hover {
 /* Netlify 免费版会在右下角挂角标，挡住底部导航 */
 #nl-badge-frame {
   display: none !important;
+}
+/* ==========================================================================
+   v4 · 交互与精细度升级层（日期面板 / 动效令牌 / 焦点可见性）
+   追加在文件末尾，覆盖前面的同名规则。
+   ========================================================================== */
+
+:root {
+  /* 动效令牌 */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --ease-std: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-sheet: cubic-bezier(0.32, 0.72, 0, 1);
+  --dur-1: 120ms;
+  --dur-2: 200ms;
+  --dur-3: 320ms;
+
+  /* 阴影：全站两层，别再加第三种 */
+  --shadow-1: 0 1px 2px rgba(34, 29, 25, 0.04), 0 8px 24px -12px rgba(34, 29, 25, 0.12);
+  --shadow-2: 0 2px 6px rgba(34, 29, 25, 0.05), 0 18px 40px -18px rgba(34, 29, 25, 0.22);
+  --ring: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent-line);
+}
+
+/* 焦点环：键盘用户必须看得见 */
+.btn:focus-visible,
+.iconbtn:focus-visible,
+.chip:focus-visible,
+.nav__item:focus-visible,
+.tabbar__item:focus-visible,
+.months__label:focus-visible,
+.scopebtn:focus-visible,
+.cal__day:focus-visible,
+.cal__mon:focus-visible,
+.pop__title:focus-visible,
+.key:focus-visible,
+.row:focus-visible,
+input:focus-visible,
+select:focus-visible,
+summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 10px;
+}
+
+/* 视图切换：只让新内容淡入上浮 4px，旧内容不做退场 */
+.view-enter {
+  animation: viewIn var(--dur-2) var(--ease-out) both;
+}
+@keyframes viewIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* 刚记完的那一行，高亮一下再淡掉 */
+.row.is-new {
+  animation: rowPop 1100ms var(--ease-out) both;
+}
+@keyframes rowPop {
+  0% {
+    background: rgba(192, 86, 44, 0.14);
+  }
+  60% {
+    background: rgba(192, 86, 44, 0.08);
+  }
+  100% {
+    background: transparent;
+  }
+}
+
+/* ---------------------------------------------------------------- 日期面板 */
+
+.popback {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: transparent;
+}
+
+@media (max-width: 860px) {
+  .popback {
+    background: rgba(30, 24, 18, 0.32);
+    backdrop-filter: blur(2px);
+  }
+}
+
+.pop {
+  z-index: 41;
+  width: 340px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-2);
+  opacity: 0;
+  transform: translateY(-6px) scale(0.985);
+  transition:
+    opacity var(--dur-2) var(--ease-out),
+    transform var(--dur-2) var(--ease-out);
+}
+
+.pop.is-open {
+  opacity: 1;
+  transform: none;
+}
+
+.pop.is-sheet {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  top: auto;
+  width: auto;
+  max-height: 82vh;
+  overflow-y: auto;
+  padding: 18px 18px calc(18px + env(safe-area-inset-bottom, 0px));
+  border-radius: 20px 20px 0 0;
+  border-bottom: 0;
+  transform: translateY(24px);
+}
+
+/* 底部抽屉的把手 */
+.pop.is-sheet::before {
+  content: '';
+  display: block;
+  width: 36px;
+  height: 4px;
+  margin: -8px auto 10px;
+  border-radius: 999px;
+  background: var(--line-strong);
+}
+
+.pop.is-sheet.is-open {
+  transform: none;
+}
+
+.pop__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.pop__title {
+  flex: 1;
+  min-height: 36px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.pop__title:hover {
+  background: var(--surface-2);
+}
+
+.pop__presets {
+  display: flex;
+  gap: 8px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding-bottom: 2px;
+}
+
+.pop__presets::-webkit-scrollbar {
+  display: none;
+}
+
+.pop__presets .chip {
+  flex: none;
+  margin: 2px 0 8px;
+}
+
+
+.chip {
+  height: 30px;
+  padding: 0 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  transition:
+    background var(--dur-1) var(--ease-std),
+    color var(--dur-1) var(--ease-std),
+    border-color var(--dur-1) var(--ease-std);
+}
+
+.chip:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.chip.is-on {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+/* 日历 */
+.cal__dow {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  margin-bottom: 2px;
+  color: var(--muted);
+  font-size: 11.5px;
+  text-align: center;
+}
+
+.cal__grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+}
+
+.cal__day {
+  display: grid;
+  place-items: center;
+  height: 38px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13.5px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition:
+    background var(--dur-1) var(--ease-std),
+    color var(--dur-1) var(--ease-std);
+}
+
+.cal__day:hover:not(.is-out) {
+  background: var(--surface-2);
+}
+
+.cal__day.is-out {
+  color: var(--muted);
+  opacity: 0.4;
+  cursor: default;
+}
+
+.cal__day.is-in {
+  background: var(--accent-soft);
+  border-radius: 2px;
+}
+
+.cal__day.is-edge {
+  background: var(--accent);
+  color: #fff7f2;
+  font-weight: 600;
+}
+
+.cal__day.is-today:not(.is-edge) {
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+  color: var(--accent-strong);
+  font-weight: 600;
+}
+
+.cal__months {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  padding: 4px 0;
+}
+
+.cal__mon {
+  height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition:
+    background var(--dur-1) var(--ease-std),
+    border-color var(--dur-1) var(--ease-std);
+}
+
+.cal__mon:hover {
+  background: var(--surface-2);
+}
+
+.cal__mon.is-on {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-weight: 600;
+}
+
+.pop__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.pop__sel {
+  min-width: 0;
+  color: var(--text-2);
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+@media (max-width: 860px) {
+  .pop__foot {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .pop__foot .btn {
+    width: 100%;
+  }
+}
+
+/* 顶部那行日期：自定义区间时字号略小，避免挤压 */
+.months__label {
+  max-width: 62vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 数字统一等宽，金额对齐不跳 */
+.amount__value,
+.summary__value,
+.row__amount,
+.bar__value,
+.memrow__value,
+.key {
+  font-variant-numeric: tabular-nums;
+}
+
+/* 降低动效偏好：全部归零，只留必要透明度 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .view-enter,
+  .row.is-new {
+    animation: none !important;
+  }
+}
+
+/* 保存按钮「还不能点」的状态：不像禁用那样死灰，只是淡一些 */
+.btn.is-blocked {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  box-shadow: none;
+}
+
+.btn.is-blocked:hover {
+  background: var(--accent-soft);
+}
+
+/* 内联错误 */
+.savenote.is-error {
+  color: var(--danger);
+  font-weight: 500;
+}
+
+/* 金额框抖一下，提示注意力 */
+.amount.is-shake {
+  animation: shake 260ms var(--ease-std);
+}
+
+@keyframes shake {
+  25% { transform: translateX(-3px); }
+  50% { transform: translateX(3px); }
+  75% { transform: translateX(-2px); }
+}
+
+/* 回收站 */
+.binlist {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.binrow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+
+.binrow__main {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.binrow .row__amount {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
 }
