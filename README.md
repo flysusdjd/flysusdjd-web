@@ -7,6 +7,7 @@ A tiny web ledger for couples and families: **each person records their own spen
 Open it, hit digits, done in about three seconds. Works offline; queued entries upload themselves later.
 
 <p align="center">
+  <img src="docs/screenshots/login.png" width="200" alt="登录 / sign in" />
   <img src="docs/screenshots/add.png" width="240" alt="记一笔 / add an entry" />
   <img src="docs/screenshots/list.png" width="240" alt="明细 / entries" />
   <img src="docs/screenshots/stats.png" width="240" alt="统计 / stats" />
@@ -47,6 +48,10 @@ Homepage: <https://flysusdjd.netlify.app> · Ledger: <https://jizhang-flysusdjd.
 | 13 个预置分类（10 支出 / 3 收入），可扩展 | 13 built-in categories (10 expense / 3 income), extensible |
 | 按天分组的明细，每天自动小计 | Entries grouped by day with daily subtotals |
 | 分类占比条形图 + 成员对比（谁花了多少） | Category bars plus a per-member breakdown |
+| 每天支出的迷你柱状图，一眼看哪天花得多 | A daily-spend mini chart so you can see the expensive days |
+| 明细里可以按备注、分类、人搜索 | Search entries by note, category or person |
+| 记错能改：点开一笔即可修改金额、分类、备注、日期 | Edit an entry's amount, category, note or date after the fact |
+| 电脑上接口感：数字键直接输入、回车保存、Esc 关闭弹层 | Keyboard-first on desktop: type digits, Enter to save, Esc to close |
 | 删除是软删除，可以恢复 | Deletes are soft — restorable |
 | 断网可记账，联网自动补传，**不会重复记两笔** | Offline capture with automatic, duplicate-free upload |
 | 可安装成 PWA，手机上像原生 App | Installable PWA that feels native on a phone |
@@ -79,7 +84,7 @@ Homepage: <https://flysusdjd.netlify.app> · Ledger: <https://jizhang-flysusdjd.
 
 ## 技术栈 / Stack
 
-- 前端：原生 HTML / CSS / ES modules，**零依赖、零构建**（没有 React，没有打包器）
+- 前端：原生 HTML / CSS / ES modules，**零依赖、零构建**（没有 React，没有打包器）；桌面左侧导航 + 手机底部 Tab 的同一套响应式布局
 - 后端：Cloudflare Worker（单文件 `worker/index.js`，手写路由）
 - 数据库：Cloudflare D1（SQLite）
 - 离线：Service Worker + localStorage 队列
