@@ -1,195 +1,240 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="zh-CN">
   <head>
-    <meta charset="utf-8" />
+    <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#faf7f4" />
+    <meta name="theme-color" content="#faf7f3" />
     <title>家庭记账本 · Family Ledger</title>
     <meta
       name="description"
-      content="两个人的账，各自记，随时合。A two-person ledger: each records their own, merged whenever you want."
+      content="两个人记账，一家人看账。家庭共享记账本，支持离线记账与邀请家人。"
     />
     <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/icons/icon-32.png" sizes="32x32" />
     <link rel="apple-touch-icon" href="/icons/icon-192.png" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-title" content="记账本" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="记账本" />
     <link rel="stylesheet" href="/styles.css" />
-    <link
-      rel="icon"
-      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='24' fill='%23b4471f'/%3E%3Ctext x='50' y='70' font-size='58' text-anchor='middle' fill='%23fff' font-family='sans-serif'%3E%E8%AE%B0%3C/text%3E%3C/svg%3E"
-    />
   </head>
   <body>
-    <!-- ============================================================ 登录 / 注册 -->
-    <section id="authScreen" class="auth">
-      <div class="auth__pane auth__pane--brand">
-        <div class="auth__blob auth__blob--a"></div>
-        <div class="auth__blob auth__blob--b"></div>
-        <div class="auth__brandtop">
-          <span class="logo">记</span>
-          <span class="logo__text">家庭记账本</span>
-        </div>
-        <div class="auth__pitch">
-          <h1>两个人的账，<br />各记各的，随时合看。</h1>
-          <p>打开就能按数字，3 秒记完一笔。你记你的，我记我的，月底一起看钱去哪了。</p>
+    <!-- ============================================================ 登录 -->
+    <div id="authScreen" class="auth">
+      <div class="auth__shell">
+        <section class="auth__brand">
+          <div class="brand">
+            <span class="brand__mark" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M6 3.5h11.5A1.5 1.5 0 0 1 19 5v14.5H6A2.5 2.5 0 0 1 3.5 17V6A2.5 2.5 0 0 1 6 3.5Z" />
+                <path d="M19 15.5H8.5A2.5 2.5 0 0 0 6 18" />
+                <path d="M8 8h7M8 11.5h4.5" />
+              </svg>
+            </span>
+            <span class="brand__name">家庭记账本</span>
+          </div>
+
+          <h1 class="auth__title">两个人记账<br />一家人看账</h1>
+          <p class="auth__lede">谁花的、花在哪，月底一眼看清。</p>
+
           <ul class="auth__points">
-            <li><span>🔒</span><div><b>只有家里人能看到</b><small>账本要邀请码才能加入，没有码进不来</small></div></li>
-            <li><span>👨‍👩‍👧</span><div><b>一个账本，多个人</b><small>邀请码拉家人进来，明细标着是谁花的</small></div></li>
-            <li><span>📶</span><div><b>断网也能记</b><small>先存本地，联网自动补传，不会丢</small></div></li>
+            <li>
+              <span class="point__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="9" cy="8" r="3.2" />
+                  <path d="M3.5 19c.6-3 2.9-4.6 5.5-4.6s4.9 1.6 5.5 4.6" />
+                  <path d="M16 5.4a3.2 3.2 0 0 1 0 6.2" />
+                  <path d="M17.4 14.7c2 .6 3.2 2.1 3.6 4.3" />
+                </svg>
+              </span>
+              <div>
+                <b>一本账，两个人</b>
+                <small>用邀请码把家人拉进来，各记各的，随时合看</small>
+              </div>
+            </li>
+            <li>
+              <span class="point__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="4.5" y="10" width="15" height="10" rx="2.5" />
+                  <path d="M8 10V7.3A4 4 0 0 1 16 7.3V10" />
+                  <circle cx="12" cy="15" r="1.2" />
+                </svg>
+              </span>
+              <div>
+                <b>只有家里人能看到</b>
+                <small>没有邀请码进不来，账本不对外公开</small>
+              </div>
+            </li>
+            <li>
+              <span class="point__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M7 16.5a4.5 4.5 0 0 1-.4-9A5.5 5.5 0 0 1 17 9.2a3.9 3.9 0 0 1 .6 7.3" />
+                  <path d="M12 12v7.5M9.4 17l2.6 2.6 2.6-2.6" />
+                </svg>
+              </span>
+              <div>
+                <b>断网也能记</b>
+                <small>先存在手机上，联网后自动补传，不会丢</small>
+              </div>
+            </li>
           </ul>
-        </div>
-        <p class="auth__foot">装到手机主屏幕，用起来和 App 一样。</p>
-      </div>
+        </section>
 
-      <div class="auth__pane auth__pane--form">
-        <div class="auth__card">
-          <div class="auth__mobilebrand">
-            <span class="logo">记</span>
-            <div>
-              <b>家庭记账本</b>
-              <small>各自记自己的，随时合起来看</small>
+        <section class="auth__form">
+          <div class="authcard">
+            <div class="authcard__head">
+              <h2 id="authTitle">欢迎回来</h2>
+              <p id="authSub">用你注册时的用户名和密码登录</p>
             </div>
+
+            <div class="segmented" id="authMode" data-mode="login" role="tablist" aria-label="登录或注册">
+              <span class="segmented__thumb" aria-hidden="true"></span>
+              <button type="button" class="segmented__btn is-active" data-mode="login" role="tab" aria-selected="true">登录</button>
+              <button type="button" class="segmented__btn" data-mode="register" role="tab" aria-selected="false">注册</button>
+            </div>
+
+            <form id="authForm" class="authform" novalidate>
+              <label class="field">
+                <span class="field__label">用户名</span>
+                <span class="field__box">
+                  <svg class="field__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <circle cx="12" cy="8.5" r="3.6" />
+                    <path d="M5 20c.8-3.6 3.6-5.6 7-5.6s6.2 2 7 5.6" />
+                  </svg>
+                  <input id="username" name="username" type="text" autocomplete="username" placeholder="3 位以上，比如 lin" autocapitalize="none" spellcheck="false" />
+                </span>
+              </label>
+
+              <label class="field" id="displayNameField" hidden>
+                <span class="field__label">怎么称呼你</span>
+                <span class="field__box">
+                  <svg class="field__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M4.5 19.5v-1.2c0-2 1.6-3.4 3.6-3.4h3.8c2 0 3.6 1.4 3.6 3.4v1.2" />
+                    <circle cx="10" cy="8.4" r="3.4" />
+                    <path d="M16.6 13.6 19 16l-.4 2.4" />
+                  </svg>
+                  <input id="displayName" name="displayName" type="text" autocomplete="nickname" placeholder="比如 小林" maxlength="20" />
+                </span>
+              </label>
+
+              <label class="field">
+                <span class="field__label">密码</span>
+                <span class="field__box">
+                  <svg class="field__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <rect x="4.5" y="10" width="15" height="10" rx="2.5" />
+                    <path d="M8 10V7.3A4 4 0 0 1 16 7.3V10" />
+                  </svg>
+                  <input id="password" name="password" type="password" autocomplete="current-password" placeholder="至少 8 位" />
+                  <button type="button" id="peekPassword" class="field__peek" aria-label="显示密码">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <path d="M2.8 12S6.3 6.2 12 6.2 21.2 12 21.2 12 17.7 17.8 12 17.8 2.8 12 2.8 12Z" />
+                      <circle cx="12" cy="12" r="2.8" />
+                    </svg>
+                  </button>
+                </span>
+              </label>
+
+              <p class="authform__error" id="authError" hidden></p>
+
+              <button type="submit" id="authSubmit" class="btn btn--primary btn--block" disabled>
+                <span class="btn__label" id="authSubmitText">登录</span>
+                <span class="btn__spinner" aria-hidden="true"></span>
+              </button>
+            </form>
+
+            <p class="authcard__foot" id="authHint">还没有账号？切到「注册」，10 秒就好。</p>
           </div>
-
-          <div class="auth__heading">
-            <h2 id="authTitle">欢迎回来</h2>
-            <p id="authSub">用你注册时的用户名和密码登录。</p>
-          </div>
-
-          <div class="segmented" id="authMode" role="tablist" aria-label="登录或注册">
-            <button type="button" class="segmented__btn is-active" data-mode="login" role="tab" aria-selected="true">登录</button>
-            <button type="button" class="segmented__btn" data-mode="register" role="tab" aria-selected="false">注册</button>
-            <span class="segmented__thumb" aria-hidden="true"></span>
-          </div>
-
-          <form id="authForm" class="auth__form" autocomplete="on" novalidate>
-            <label class="field">
-              <span class="field__label">用户名</span>
-              <span class="field__control">
-                <svg class="field__icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm0 2c-4 0-7 2.2-7 4.5V20h14v-1.5C19 16.2 16 14 12 14Z" /></svg>
-                <input
-                  id="username"
-                  name="username"
-                  type="text"
-                  inputmode="latin"
-                  autocapitalize="none"
-                  autocorrect="off"
-                  spellcheck="false"
-                  placeholder="比如 lin"
-                  required
-                />
-              </span>
-            </label>
-
-            <label class="field">
-              <span class="field__label">密码</span>
-              <span class="field__control">
-                <svg class="field__icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M17 9V7a5 5 0 0 0-10 0v2H5.5v11h13V9H17ZM9 7a3 3 0 1 1 6 0v2H9V7Z" /></svg>
-                <input
-                  id="password"
-                  name="password"
-                  type="password"
-                  placeholder="至少 8 位"
-                  minlength="8"
-                  required
-                />
-                <button type="button" class="field__peek" id="peekPassword" aria-label="显示密码">
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5c-5 0-9 4.5-9 7s4 7 9 7 9-4.5 9-7-4-7-9-7Zm0 11.5A4.5 4.5 0 1 1 12 7.5a4.5 4.5 0 0 1 0 9Zm0-2a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z" /></svg>
-                </button>
-              </span>
-            </label>
-
-            <label class="field" id="displayNameField" hidden>
-              <span class="field__label">怎么称呼你</span>
-              <span class="field__control">
-                <svg class="field__icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 3 6v6c0 5 3.8 8.6 9 10 5.2-1.4 9-5 9-10V6l-9-4Zm0 5a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5Zm0 11c-1.7 0-3.2-.8-4.2-2 .9-1.2 2.4-2 4.2-2s3.3.8 4.2 2c-1 1.2-2.5 2-4.2 2Z" /></svg>
-                <input id="displayName" type="text" maxlength="24" placeholder="比如 小林" />
-              </span>
-            </label>
-
-            <p id="authError" class="error" role="alert" hidden></p>
-
-            <button id="authSubmit" class="btn btn--primary btn--block" type="submit" disabled>
-              <span class="btn__spinner" aria-hidden="true"></span>
-              <span id="authSubmitText">登录</span>
-            </button>
-          </form>
-        </div>
+        </section>
       </div>
-    </section>
+    </div>
 
-    <!-- ============================================================ 主应用 -->
+    <!-- ============================================================ 应用 -->
     <div id="appScreen" class="shell" hidden>
       <aside class="sidebar">
-        <div class="sidebar__brand">
-          <span class="logo logo--sm">记</span>
-          <div class="sidebar__brandtext">
-            <b>家庭记账本</b>
-            <small id="sideHousehold">—</small>
-          </div>
+        <div class="brand brand--side">
+          <span class="brand__mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M6 3.5h11.5A1.5 1.5 0 0 1 19 5v14.5H6A2.5 2.5 0 0 1 3.5 17V6A2.5 2.5 0 0 1 6 3.5Z" />
+              <path d="M19 15.5H8.5A2.5 2.5 0 0 0 6 18" />
+              <path d="M8 8h7M8 11.5h4.5" />
+            </svg>
+          </span>
+          <span class="brand__name" id="sideHousehold">家庭记账本</span>
         </div>
 
-        <nav class="nav" role="tablist" aria-label="主导航">
-          <button class="nav__item" data-view="add" role="tab">
-            <span class="nav__icon">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6V5Z" /></svg>
-            </span>
-            <span class="nav__label">记一笔</span>
+        <nav class="nav" aria-label="主导航">
+          <button type="button" class="nav__item is-active" data-view="add" aria-selected="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+            <span>记一笔</span>
           </button>
-          <button class="nav__item" data-view="list" role="tab">
-            <span class="nav__icon">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16v2H4V6Zm0 5h16v2H4v-2Zm0 5h16v2H4v-2Z" /></svg>
-            </span>
-            <span class="nav__label">明细</span>
+          <button type="button" class="nav__item" data-view="list" aria-selected="false">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 6.5h11M8 12h11M8 17.5h11" /><circle cx="4.6" cy="6.5" r="1" /><circle cx="4.6" cy="12" r="1" /><circle cx="4.6" cy="17.5" r="1" /></svg>
+            <span>明细</span>
           </button>
-          <button class="nav__item" data-view="stats" role="tab">
-            <span class="nav__icon">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19V10h3v9H5Zm5 0V5h3v14h-3Zm5 0v-6h3v6h-3Z" /></svg>
-            </span>
-            <span class="nav__label">统计</span>
+          <button type="button" class="nav__item" data-view="stats" aria-selected="false">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 19.5h15" /><path d="M7.5 19.5v-6M12 19.5V8M16.5 19.5v-8.5" /></svg>
+            <span>统计</span>
           </button>
-          <button class="nav__item" data-view="me" role="tab">
-            <span class="nav__icon">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm0 2c-4.4 0-8 2.4-8 5.4V21h16v-1.6c0-3-3.6-5.4-8-5.4Z" /></svg>
-            </span>
-            <span class="nav__label">我的</span>
+          <button type="button" class="nav__item" data-view="me" aria-selected="false">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8.5" r="3.6" /><path d="M5 20c.8-3.6 3.6-5.6 7-5.6s6.2 2 7 5.6" /></svg>
+            <span>我的</span>
           </button>
         </nav>
 
-        <div class="sidebar__user">
+        <button type="button" class="sideuser" id="sideUser" data-view="me">
           <span class="avatar" id="sideAvatar">?</span>
-          <div>
+          <span class="sideuser__text">
             <b id="sideUserName">—</b>
-            <small id="sideRole">成员</small>
-          </div>
-        </div>
+            <small id="sideRole">—</small>
+          </span>
+        </button>
       </aside>
 
-      <main class="main">
-        <header class="pagehead">
-          <div class="monthpick">
-            <button id="monthPrev" class="icon-btn" aria-label="上个月">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5 8 12l7 7 1.4-1.4L10.8 12l5.6-5.6L15 5Z" /></svg>
+      <div class="workspace">
+        <header class="topbar">
+          <div class="months">
+            <button type="button" class="iconbtn" id="monthPrev" aria-label="上个月">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.5 6.5 8.5 12l6 5.5" /></svg>
             </button>
-            <button id="monthLabel" class="monthpick__label"></button>
-            <button id="monthNext" class="icon-btn" aria-label="下个月">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7-1.4-1.4L13.2 12 7.6 6.4 9 5Z" /></svg>
+            <button type="button" class="months__label" id="monthLabel" title="回到本月">2026 年 11 月</button>
+            <button type="button" class="iconbtn" id="monthNext" aria-label="下个月">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.5 6.5 15.5 12l-6 5.5" /></svg>
             </button>
           </div>
-          <button id="scopeToggle" class="scopebtn" title="切换 只看我 / 全家">
-            <span class="scopebtn__dot"></span>
-            <span id="scopeText">全家</span>
-          </button>
+
+          <div class="topbar__right">
+            <button type="button" class="scopebtn" id="scopeToggle" data-scope="all" aria-label="切换数据范围">
+              <span class="scopebtn__dot" aria-hidden="true"></span>
+              <span id="scopeText">全家</span>
+            </button>
+          </div>
         </header>
 
-        <div id="view" class="view"></div>
-      </main>
+        <main class="view" id="view"></main>
+      </div>
+
+      <nav class="tabbar" aria-label="主导航">
+        <button type="button" class="nav__item is-active" data-view="add" aria-selected="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+          <span>记一笔</span>
+        </button>
+        <button type="button" class="nav__item" data-view="list" aria-selected="false">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 6.5h11M8 12h11M8 17.5h11" /><circle cx="4.6" cy="6.5" r="1" /><circle cx="4.6" cy="12" r="1" /><circle cx="4.6" cy="17.5" r="1" /></svg>
+          <span>明细</span>
+        </button>
+        <button type="button" class="nav__item" data-view="stats" aria-selected="false">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 19.5h15" /><path d="M7.5 19.5v-6M12 19.5V8M16.5 19.5v-8.5" /></svg>
+          <span>统计</span>
+        </button>
+        <button type="button" class="nav__item" data-view="me" aria-selected="false">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8.5" r="3.6" /><path d="M5 20c.8-3.6 3.6-5.6 7-5.6s6.2 2 7 5.6" /></svg>
+          <span>我的</span>
+        </button>
+      </nav>
     </div>
 
-    <div id="toast" class="toast" hidden></div>
+    <div id="toast" class="toast" hidden role="status" aria-live="polite"></div>
     <div id="modal" class="modal" hidden></div>
 
-    <script type="module" src="/app.js"></script>
+    <script src="/app.js" type="module"></script>
   </body>
 </html>

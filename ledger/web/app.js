@@ -1,1008 +1,1529 @@
-/**
- * 家庭记账本 —— 前端 / frontend
- *
- * 无框架、无构建，一个文件。打开就能按数字，3 秒记完一笔；
- * 电脑上支持实体键盘（数字 / 退格 / 回车），手机上就是九宫格。
- */
+/* =============================================================================
+   家庭记账本 · Family Ledger  —  app.js (v3)
+   数据结构与接口沿用 worker/index.js，不新增后端字段。
+   ============================================================================= */
 
-/* ------------------------------------------------------------------ 状态 */
+const $ = (sel, root = document) => root.querySelector(sel);
+const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
-const state = {
-  user: null,
-  members: [],
-  categories: [],
-  month: new Date().toISOString().slice(0, 7),
-  scope: localStorage.getItem('scope') || 'all', // all | me
-  view: 'add',
-  entries: [],
-  stats: null,
-  keyword: '',
-  draft: {
-    digits: '', // 按分存：'2850' => ¥28.50
-    direction: 'expense',
-    categoryId: null,
-    note: '',
-    occurredOn: today(),
-  },
+/* ------------------------------------------------------------------ 图标集 */
+/* 统一线性风格，替代 emoji。分类按名字匹配，匹配不到用默认图标。 */
+
+const ICON = {
+  add: '<path d="M12 5v14M5 12h14"/>',
+  list: '<path d="M8 6.5h11M8 12h11M8 17.5h11"/><circle cx="4.6" cy="6.5" r="1"/><circle cx="4.6" cy="12" r="1"/><circle cx="4.6" cy="17.5" r="1"/>',
+  stats: '<path d="M4.5 19.5h15"/><path d="M7.5 19.5v-6M12 19.5V8M16.5 19.5v-8.5"/>',
+  user: '<circle cx="12" cy="8.5" r="3.6"/><path d="M5 20c.8-3.6 3.6-5.6 7-5.6s6.2 2 7 5.6"/>',
+  backspace: '<path d="M20 6.5H9.2L3.5 12l5.7 5.5H20a1.5 1.5 0 0 0 1.5-1.5V8a1.5 1.5 0 0 0-1.5-1.5Z"/><path d="M12.5 9.8 16.2 14M16.2 9.8 12.5 14"/>',
+  search: '<circle cx="11" cy="11" r="6.2"/><path d="M15.6 15.6 20 20"/>',
+  empty: '<path d="M4.8 7.5h14.4l-1 11.2a1.8 1.8 0 0 1-1.8 1.6H7.6a1.8 1.8 0 0 1-1.8-1.6Z"/><path d="M8.4 7.5V6a3.6 3.6 0 0 1 7.2 0v1.5"/>',
+  check: '<path d="M5 12.5 9.6 17 19 7.5"/>',
+  close: '<path d="M6.5 6.5 17.5 17.5M17.5 6.5 6.5 17.5"/>',
+  copy: '<rect x="8.5" y="8.5" width="11" height="11" rx="2.4"/><path d="M15.5 8.5V6.4A2.4 2.4 0 0 0 13.1 4H6.4A2.4 2.4 0 0 0 4 6.4v6.7a2.4 2.4 0 0 0 2.4 2.4h2.1"/>',
+  people: '<circle cx="9" cy="8" r="3.2"/><path d="M3.5 19c.6-3 2.9-4.6 5.5-4.6s4.9 1.6 5.5 4.6"/><path d="M16 5.4a3.2 3.2 0 0 1 0 6.2"/><path d="M17.4 14.7c2 .6 3.2 2.1 3.6 4.3"/>',
+  wallet: '<rect x="3.5" y="6" width="17" height="13" rx="3"/><path d="M3.5 10h17"/><circle cx="16.8" cy="14.6" r="1.1"/>',
+  food: '<path d="M4 13h16a8 8 0 0 1-16 0Z"/><path d="M8.6 9.6c0-1.3 1.1-1.7 1.1-3"/><path d="M12 9.6c0-1.3 1.1-1.7 1.1-3"/>',
+  grocery: '<path d="M4.5 8.5h15l-1.4 10a2 2 0 0 1-2 1.7H7.9a2 2 0 0 1-2-1.7Z"/><path d="M9 8.5V6.8a3 3 0 0 1 6 0v1.7"/>',
+  transit: '<rect x="5" y="4.5" width="14" height="12.5" rx="3"/><path d="M5 12h14"/><circle cx="9" cy="14.6" r="1"/><circle cx="15" cy="14.6" r="1"/><path d="M8 20.5l1.4-3.5M16 20.5l-1.4-3.5"/>',
+  home: '<path d="M4 10.8 12 4l8 6.8V19a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 19Z"/><path d="M9.5 20.5v-5.2h5v5.2"/>',
+  daily: '<path d="M9 3.5v3M15 3.5v3"/><rect x="4" y="6" width="16" height="14" rx="2.6"/><path d="M4 11h16"/>',
+  health: '<path d="M12 20.5S4.5 16 4.5 10.4A4.4 4.4 0 0 1 12 7.6a4.4 4.4 0 0 1 7.5 2.8C19.5 16 12 20.5 12 20.5Z"/>',
+  fun: '<rect x="3.5" y="7.5" width="17" height="9.5" rx="4.7"/><circle cx="8.4" cy="12.2" r="1.1"/><circle cx="15.6" cy="12.2" r="1.1"/><path d="M11 10.4v3.4"/>',
+  study: '<path d="M4 6.5h6.2a2 2 0 0 1 1.8 1.1V20a2.4 2.4 0 0 0-2-1.2H4Z"/><path d="M20 6.5h-6.2a2 2 0 0 0-1.8 1.1V20a2.4 2.4 0 0 1 2-1.2H20Z"/>',
+  gift: '<rect x="3.8" y="9" width="16.4" height="11.5" rx="2"/><path d="M3.8 13.2h16.4M12 9v11.5"/><path d="M12 9S10.6 4.5 8.2 4.5a2.3 2.3 0 0 0 0 4.5M12 9s1.4-4.5 3.8-4.5a2.3 2.3 0 0 1 0 4.5"/>',
+  other: '<circle cx="12" cy="12" r="8.2"/><path d="M12 8.4v.2M12 11.6v4"/>',
+  salary: '<rect x="3.5" y="6.5" width="17" height="11" rx="2.4"/><circle cx="12" cy="12" r="2.6"/><path d="M6.6 9.6v.2M17.4 14.2v.2"/>',
+  bonus: '<path d="M12 3.6l2.5 5 5.5.8-4 3.9.9 5.5-4.9-2.6-4.9 2.6.9-5.5-4-3.9 5.5-.8Z"/>',
+  invest: '<path d="M4 17.5 9.2 12l3.4 3.2L20 7.5"/><path d="M15.5 7.5H20V12"/>',
+  trend: '<path d="M4 15.5 9 10l3.5 3.5L20 6"/><path d="M15 6h5v5"/>',
 };
 
-function today() {
+const icon = (name, cls = '') => {
+  const path = ICON[name] || ICON.other;
+  return `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${path}</svg>`;
+};
+
+/* 分类名 → 图标 / 线性色调 */
+const CATEGORY_ICON = {
+  餐饮: 'food',
+  买菜: 'grocery',
+  交通: 'transit',
+  日用: 'daily',
+  住房: 'home',
+  医疗: 'health',
+  娱乐: 'fun',
+  学习: 'study',
+  人情: 'gift',
+  其他: 'other',
+  工资: 'salary',
+  奖金: 'bonus',
+  理财: 'invest',
+  报销: 'wallet',
+  兼职: 'salary',
+  红包: 'gift',
+};
+
+const catIcon = (name) => icon(CATEGORY_ICON[name] || 'other');
+
+/* ------------------------------------------------------------------ 工具 */
+
+const pad = (n) => String(n).padStart(2, '0');
+
+/* 触屏和键盘两套提示 */
+const isTouch = () => window.innerWidth <= 860 || navigator.maxTouchPoints > 0;
+const saveHint = () => (isTouch() ? '选好分类就能保存' : '电脑上可以直接按数字键，回车保存。');
+
+const todayStr = () => {
   const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
-    d.getDate(),
-  ).padStart(2, '0')}`;
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+};
+
+const monthStr = (d = new Date()) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
+
+const fmtMoney = (cents, { sign = false, symbol = true } = {}) => {
+  const abs = Math.abs(cents || 0);
+  const yuan = Math.floor(abs / 100);
+  const fen = pad(abs % 100);
+  const withComma = String(yuan).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  const prefix = symbol ? '¥' : '';
+  if (!sign) return `${prefix}${withComma}.${fen}`;
+  if (cents < 0) return `−${prefix}${withComma}.${fen}`;
+  return `${prefix}${withComma}.${fen}`;
+};
+
+const fmtMonthCN = (m) => {
+  const [y, mm] = m.split('-');
+  return `${y} 年 ${Number(mm)} 月`;
+};
+
+const dayLabel = (iso) => {
+  const today = todayStr();
+  const d = new Date(`${iso}T00:00:00`);
+  const yest = new Date();
+  yest.setDate(yest.getDate() - 1);
+  const yestStr = `${yest.getFullYear()}-${pad(yest.getMonth() + 1)}-${pad(yest.getDate())}`;
+  if (iso === today) return '今天';
+  if (iso === yestStr) return '昨天';
+  const week = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][d.getDay()];
+  return `${Number(iso.slice(5, 7))} 月 ${Number(iso.slice(8, 10))} 日 · ${week}`;
+};
+
+async function sha256Hex(text) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-const $ = (sel) => document.querySelector(sel);
-const el = (tag, props = {}, children = []) => {
-  const node = document.createElement(tag);
-  Object.assign(node, props);
-  for (const c of [].concat(children)) if (c) node.append(c);
-  return node;
-};
-
-const money = (cents) =>
-  (cents / 100).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-
-/* ------------------------------------------------------------- 密码拉伸 */
-
-/**
- * 和 worker 侧 smoke 测试完全一致的参数，换成浏览器实现。
- * salt 由用户名派生（SHA-256 前 16 字节），所以服务器不需要存 salt，
- * 也就不会出现「先查用户名是否存在」的探测面。
- */
+/** 密码不出浏览器：600k 次 PBKDF2，只把拉伸结果发出去 */
 async function deriveAuthHash(username, password) {
-  const enc = new TextEncoder();
-  const saltBuf = await crypto.subtle.digest(
-    'SHA-256',
-    enc.encode(`ledger:v1:${username.toLowerCase()}`),
-  );
-  const salt = new Uint8Array(saltBuf).slice(0, 16);
-
-  const baseKey = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, [
+  const saltHex = (await sha256Hex(`ledger:v1:${username.toLowerCase()}`)).slice(0, 32);
+  const salt = new Uint8Array(saltHex.match(/.{2}/g).map((h) => parseInt(h, 16)));
+  const baseKey = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, [
     'deriveBits',
   ]);
   const bits = await crypto.subtle.deriveBits(
-    { name: 'PBKDF2', salt, iterations: 600_000, hash: 'SHA-256' },
+    { name: 'PBKDF2', salt, iterations: 600000, hash: 'SHA-256' },
     baseKey,
     256,
   );
   return [...new Uint8Array(bits)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-/* ------------------------------------------------------------------ API */
-
-async function api(method, path, body) {
-  const cacheKey = `cache:${path}`;
-
-  let res;
-  try {
-    res = await fetch(path, {
-      method,
-      headers: body ? { 'content-type': 'application/json' } : {},
-      body: body ? JSON.stringify(body) : undefined,
-      credentials: 'same-origin',
-    });
-  } catch (e) {
-    // 断网：GET 用上次存下来的那份，写入类请求交给离线队列
-    if (method === 'GET') {
-      const cached = localStorage.getItem(cacheKey);
-      if (cached) return JSON.parse(cached);
-    }
-    throw e;
-  }
-
-  let data = null;
-  try {
-    data = await res.json();
-  } catch {
-    /* no body */
-  }
-
-  if (res.status === 401 && !path.startsWith('/api/auth')) {
-    showAuth();
-    throw new Error('未登录');
-  }
-  if (!res.ok) throw new Error(data?.message || `请求失败 (${res.status})`);
-
-  if (method === 'GET') localStorage.setItem(cacheKey, JSON.stringify(data));
-  return data;
-}
-
-/* ------------------------------------------------------------- 登录 / 注册 */
-
-let authMode = 'login';
-
-function setAuthMode(mode) {
-  authMode = mode;
-  const isLogin = mode === 'login';
-
-  const seg = $('#authMode');
-  if (seg) {
-    seg.dataset.mode = mode;
-    for (const b of seg.querySelectorAll('.segmented__btn')) {
-      const on = b.dataset.mode === mode;
-      b.classList.toggle('is-active', on);
-      b.setAttribute('aria-selected', String(on));
-    }
-  }
-
-  $('#displayNameField').hidden = isLogin;
-  $('#authSubmitText').textContent = isLogin ? '登录' : '创建账号';
-  $('#authError').hidden = true;
-
-  const title = $('#authTitle');
-  const sub = $('#authSub');
-  if (title) title.textContent = isLogin ? '欢迎回来' : '建一个账本';
-  if (sub) {
-    sub.textContent = isLogin
-      ? '用你注册时的用户名和密码登录。'
-      : '填一个用户名和密码就能开始，稍后再邀请家人。';
-  }
-}
-
-async function submitAuth(event) {
-  event.preventDefault();
-  const username = $('#username').value.trim();
-  const password = $('#password').value;
-  const btn = $('#authSubmit');
-  const err = $('#authError');
-  err.hidden = true;
-
-  if (username.length < 3) return showAuthError('用户名至少 3 位');
-  if (password.length < 8) return showAuthError('密码至少 8 位');
-
-  const original = $('#authSubmitText').textContent;
-  btn.disabled = true;
-  btn.classList.add('is-loading');
-  $('#authSubmitText').textContent = '正在加密…';
-
-  try {
-    const authHash = await deriveAuthHash(username, password);
-    if (authMode === 'register') {
-      await api('POST', '/api/auth/register', {
-        username,
-        displayName: $('#displayName').value.trim() || username,
-        authHash,
-      });
-    } else {
-      await api('POST', '/api/auth/login', { username, authHash });
-    }
-    await boot();
-  } catch (e) {
-    showAuthError(e.message);
-  } finally {
-    btn.classList.remove('is-loading');
-    $('#authSubmitText').textContent = original;
-    syncAuthButton();
-  }
-}
-
-function showAuthError(msg) {
-  const err = $('#authError');
-  err.textContent = msg;
-  err.hidden = false;
-}
-
-function showAuth() {
-  $('#appScreen').hidden = true;
-  $('#authScreen').hidden = false;
-  $('#password').value = '';
-  syncAuthButton();
-}
-
-function syncAuthButton() {
-  const ok = $('#username').value.trim().length >= 3 && $('#password').value.length >= 8;
-  $('#authSubmit').disabled = !ok;
-}
-
-/* ------------------------------------------------------------------ 启动 */
-
-async function boot() {
-  try {
-    const data = await api('GET', '/api/me');
-    state.user = data.user;
-    state.members = data.members || [];
-    const cats = await api('GET', '/api/categories');
-    state.categories = cats.categories;
-    state.draft.categoryId =
-      state.draft.categoryId ||
-      state.categories.find((c) => c.direction === state.draft.direction)?.id ||
-      null;
-    $('#authScreen').hidden = true;
-    $('#appScreen').hidden = false;
-    render();
-  } catch {
-    showAuth();
-  }
-}
-
-/* ------------------------------------------------------------------ 渲染 */
-
-function formatMonth(m) {
-  const [y, mo] = m.split('-');
-  return `${y} 年 ${Number(mo)} 月`;
-}
-
-function render() {
-  for (const t of document.querySelectorAll('.nav__item')) {
-    t.setAttribute('aria-selected', String(t.dataset.view === state.view));
-  }
-
-  $('#monthLabel').textContent = formatMonth(state.month);
-  $('#scopeText').textContent = state.scope === 'me' ? '只看我' : '全家';
-  $('#scopeToggle').dataset.scope = state.scope;
-
-  if (state.user) {
-    const name = state.user.displayName || state.user.username;
-    $('#sideUserName').textContent = name;
-    $('#sideAvatar').textContent = [...name][0] || '?';
-    $('#sideRole').textContent = state.user.role === 'owner' ? '账本创建者' : '成员';
-    $('#sideHousehold').textContent = state.user.householdName || '—';
-  }
-
-  const view = $('#view');
-  view.replaceChildren();
-  if (state.view === 'add') view.append(renderAdd());
-  if (state.view === 'list') renderList(view);
-  if (state.view === 'stats') renderStats(view);
-  if (state.view === 'me') renderMe(view);
-}
-
-function summaryRow(labels) {
-  const wrap = el('div', { className: 'summary' });
-  for (const [label, value, cls] of labels) {
-    const cell = el('div', { className: 'summary__cell' });
-    cell.append(
-      el('div', { className: 'summary__label', textContent: label }),
-      el('div', { className: `summary__value ${cls || ''}`, textContent: '¥' + value }),
-    );
-    wrap.append(cell);
-  }
-  return wrap;
-}
-
-/* --------------------------------------------------------------- 记一笔 */
-
-function renderAdd() {
-  const d = state.draft;
-  const wrap = el('div', { className: 'compose' });
-
-  /* 左卡片：金额 + 数字键盘 */
-  const left = el('div', { className: 'card' });
-
-  const amountRow = el('div', { className: 'amount' });
-  amountRow.append(
-    el('span', { className: 'amount__cur', textContent: '¥' }),
-    el(
-      'span',
-      { className: 'amount__value' + (d.digits ? '' : ' is-zero') },
-      money(Number(d.digits || 0)),
-    ),
-  );
-  left.append(amountRow);
-
-  const pad = el('div', { className: 'keypad' });
-  const press = (key) => {
-    if (key === 'del') d.digits = d.digits.slice(0, -1);
-    else if (key === '00') {
-      if (d.digits) d.digits = (d.digits + '00').slice(0, 9);
-    } else if (key === 'clear') d.digits = '';
-    else d.digits = (d.digits + key).slice(0, 9);
-    render();
-  };
-  for (const k of ['1', '2', '3', '4', '5', '6', '7', '8', '9', '00', '0', 'del']) {
-    const b = el('button', {
-      type: 'button',
-      className: 'key',
-      textContent: k === 'del' ? '⌫' : k,
-      'aria-label': k === 'del' ? '删除一位' : k,
-    });
-    b.onclick = () => press(k);
-    pad.append(b);
-  }
-  left.append(pad);
-  wrap.append(left);
-
-  /* 右卡片：收/支、分类、备注、日期、保存 */
-  const right = el('div', { className: 'card' });
-
-  const dir = el('div', { className: 'direction' });
-  for (const [key, label] of [
-    ['expense', '支出'],
-    ['income', '收入'],
-  ]) {
-    const b = el('button', { type: 'button', textContent: label });
-    b.setAttribute('aria-pressed', String(d.direction === key));
-    b.onclick = () => {
-      d.direction = key;
-      const first = state.categories.find((c) => c.direction === key);
-      if (first) d.categoryId = first.id;
-      render();
-    };
-    dir.append(b);
-  }
-  right.append(dir);
-
-  const cats = state.categories.filter((c) => c.direction === d.direction);
-  const grid = el('div', { className: 'catgrid' });
-  for (const c of cats) {
-    const b = el('button', { type: 'button', className: 'cat' });
-    b.setAttribute('aria-pressed', String(d.categoryId === c.id));
-    b.append(el('span', { className: 'cat__emoji', textContent: c.emoji }), el('span', { textContent: c.name }));
-    b.onclick = () => {
-      d.categoryId = c.id;
-      render();
-    };
-    grid.append(b);
-  }
-  right.append(grid);
-
-  const meta = el('div', { className: 'compose__meta' });
-  const note = el('input', { type: 'text', placeholder: '备注（可空）', maxLength: 120, value: d.note });
-  note.oninput = () => {
-    d.note = note.value;
-  };
-  const date = el('input', { type: 'date', value: d.occurredOn });
-  date.onchange = () => {
-    d.occurredOn = date.value || today();
-  };
-  meta.append(note, date);
-  right.append(meta);
-
-  const save = el('button', { type: 'button', className: 'key key--save', textContent: '记下来' });
-  save.style.marginTop = '12px';
-  save.disabled = !d.digits;
-  save.onclick = saveEntry;
-  right.append(save);
-
-  right.append(el('p', { className: 'hint', textContent: '电脑上可以直接按数字键，回车保存。' }));
-  wrap.append(right);
-
-  return wrap;
-}
-
-async function saveEntry() {
-  const d = state.draft;
-  if (!d.digits || !d.categoryId) {
-    if (!d.digits) toast('先按数字键输入金额');
-    return;
-  }
-  const cents = Number(d.digits);
-  const payload = {
-    amountCents: cents,
-    direction: d.direction,
-    categoryId: d.categoryId,
-    note: d.note,
-    occurredOn: d.occurredOn,
-    clientUuid: crypto.randomUUID(),
-  };
-  try {
-    await api('POST', '/api/entries', payload);
-    toast(`已记 ${d.direction === 'income' ? '+' : '−'}¥${money(cents)}`);
-  } catch (e) {
-    if (looksOffline(e)) {
-      const queue = readOutbox();
-      queue.push(payload);
-      writeOutbox(queue);
-      toast('网络不通，已先存在这台设备上，联网后自动上传');
-    } else {
-      toast(e.message);
-      return;
-    }
-  }
-  d.digits = '';
-  d.note = '';
-  render();
-}
-
-/* -------------------------------------------------------------- 离线队列 */
+/* -------------------------------------------------------------- 网络层 */
 
 const OUTBOX_KEY = 'outbox';
 
-function readOutbox() {
+const readOutbox = () => {
   try {
     return JSON.parse(localStorage.getItem(OUTBOX_KEY) || '[]');
   } catch {
     return [];
   }
-}
+};
 
-function writeOutbox(items) {
-  localStorage.setItem(OUTBOX_KEY, JSON.stringify(items));
-}
-
-function looksOffline(err) {
-  return (
-    err instanceof TypeError ||
-    /Failed to fetch|NetworkError|Load failed|network/i.test(String(err?.message || ''))
-  );
-}
-
-/** 把断网时攒下的记录补传上去；client_uuid 保证重复上传也不会记两笔。 */
-async function flushOutbox() {
-  const items = readOutbox();
-  if (!items.length) return;
-  const left = [];
-  let sent = 0;
-  for (const item of items) {
-    try {
-      await api('POST', '/api/entries', item);
-      sent += 1;
-    } catch (e) {
-      // 409 = 这笔之前已经成功上传过（离线重试场景），视为成功
-      if (/\b409\b|已存在|duplicate/i.test(String(e.message))) sent += 1;
-      else left.push(item);
-    }
-  }
-  writeOutbox(left);
-  if (sent) {
-    toast(`离线攒的 ${sent} 笔已同步`);
-    if (state.view === 'list' || state.view === 'stats') render();
-  }
-}
-
-/* ------------------------------------------------------------------ 明细 */
-
-async function renderList(view) {
-  view.append(el('div', { className: 'empty', textContent: '加载中…' }));
+const writeOutbox = (items) => {
   try {
-    const [entries, stats] = await Promise.all([
-      api('GET', `/api/entries?month=${state.month}&member=${state.scope}`),
-      api('GET', `/api/stats?month=${state.month}&member=${state.scope}`),
-    ]);
-    state.entries = entries.entries;
-    state.stats = stats;
-  } catch (e) {
-    view.replaceChildren(el('div', { className: 'empty', textContent: e.message }));
-    return;
+    localStorage.setItem(OUTBOX_KEY, JSON.stringify(items));
+  } catch {
+    /* 空间满就算了 */
   }
+};
 
-  const s = state.stats.total;
-  view.replaceChildren(
-    summaryRow([
-      ['支出', money(s.expense), ''],
-      ['收入', money(s.income), 'summary__value--income'],
-      ['结余', money(s.balance), ''],
-    ]),
-  );
+const looksOffline = (err) =>
+  err instanceof TypeError || /Failed to fetch|NetworkError|Load failed|network/i.test(String(err?.message || ''));
 
-  const toolbar = el('div', { className: 'toolbar' });
-  const box = el('div', { className: 'searchbox' });
-  box.innerHTML =
-    '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 4a6 6 0 1 1-4.5 10L2 17.5 3.5 19l3.5-3.5A6 6 0 0 1 10 4Zm0 2a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z"/></svg>';
-  const search = el('input', { type: 'text', placeholder: '搜备注、分类或人', value: state.keyword });
-  search.oninput = () => {
-    state.keyword = search.value.trim();
-    repaintRows();
+let onUnauthorized = () => {};
+
+async function api(method, path, body) {
+  const init = {
+    method,
+    credentials: 'same-origin',
+    headers: { 'content-type': 'application/json' },
   };
-  box.append(search);
-  toolbar.append(box);
-  view.append(toolbar);
+  if (body !== undefined) init.body = JSON.stringify(body);
 
-  const listWrap = el('div', {});
-  view.append(listWrap);
-
-  function repaintRows() {
-    listWrap.replaceChildren();
-    const k = state.keyword.toLowerCase();
-    const items = k
-      ? state.entries.filter((e) =>
-          `${e.note || ''} ${e.category_name || ''} ${e.author_name || ''}`.toLowerCase().includes(k),
-        )
-      : state.entries;
-
-    if (!items.length) {
-      listWrap.append(
-        el('div', {
-          className: 'empty',
-          textContent: k ? '没有匹配的记录' : '这个月还没有账，去「记一笔」开始吧。',
-        }),
-      );
-      return;
-    }
-
-    const byDay = new Map();
-    for (const e of items) {
-      if (!byDay.has(e.occurred_on)) byDay.set(e.occurred_on, []);
-      byDay.get(e.occurred_on).push(e);
-    }
-
-    for (const [day, dayItems] of byDay) {
-      const group = el('div', { className: 'daygroup' });
-      const spent = dayItems
-        .filter((i) => i.direction === 'expense')
-        .reduce((a, b) => a + b.amount_cents, 0);
-      group.append(
-        el('div', { className: 'daygroup__head' }, [
-          el('span', { textContent: dayLabel(day) }),
-          el('span', { textContent: spent ? `支出 ¥${money(spent)}` : '' }),
-        ]),
-      );
-      for (const item of dayItems) {
-        const row = el('button', { type: 'button', className: 'row' });
-        row.append(
-          el('span', { className: 'row__emoji', textContent: item.category_emoji || '📦' }),
-          el('div', { className: 'row__main' }, [
-            el('div', { className: 'row__title', textContent: item.note || item.category_name || '未分类' }),
-            el('div', {
-              className: 'row__sub',
-              textContent: item.note
-                ? `${item.category_name || '未分类'} · ${item.author_name}`
-                : item.author_name,
-            }),
-          ]),
-          el('span', {
-            className: 'row__amount' + (item.direction === 'income' ? ' row__amount--income' : ''),
-            textContent: (item.direction === 'income' ? '+' : '−') + money(item.amount_cents),
-          }),
-        );
-        row.onclick = () => openEntryModal(item);
-        group.append(row);
-      }
-      listWrap.append(group);
-    }
-  }
-
-  repaintRows();
-}
-
-function dayLabel(day) {
-  if (day === today()) return '今天';
-  const d = new Date(day + 'T00:00:00');
-  const week = ['日', '一', '二', '三', '四', '五', '六'][d.getDay()];
-  return `${Number(day.slice(5, 7))} 月 ${Number(day.slice(8, 10))} 日 · 周${week}`;
-}
-
-/* --------------------------------------------------------------- 统计 */
-
-async function renderStats(view) {
-  view.append(el('div', { className: 'empty', textContent: '加载中…' }));
+  let res;
   try {
-    state.stats = await api('GET', `/api/stats?month=${state.month}&member=${state.scope}`);
-  } catch (e) {
-    view.replaceChildren(el('div', { className: 'empty', textContent: e.message }));
-    return;
-  }
-
-  const s = state.stats;
-  const total = s.total;
-  view.replaceChildren(
-    summaryRow([
-      ['本月支出', money(total.expense), ''],
-      ['本月收入', money(total.income), 'summary__value--income'],
-      ['结余', money(total.balance), ''],
-    ]),
-  );
-
-  if (s.byDay && s.byDay.length) {
-    view.append(el('h3', { className: 'section-title', textContent: '每天花了多少' }));
-    view.append(renderSpark(s.byDay));
-  }
-
-  const expenses = (s.byCategory || []).filter((c) => c.direction === 'expense');
-  if (expenses.length) {
-    view.append(el('h3', { className: 'section-title', textContent: '钱花在哪了' }));
-    const sum = expenses.reduce((a, b) => a + b.cents, 0) || 1;
-    const max = expenses[0].cents || 1;
-    const bars = el('div', { className: 'bars' });
-    for (const c of expenses.slice(0, 8)) {
-      const bar = el('div', { className: 'bar' });
-      const track = el('div', { className: 'bar__track' });
-      track.append(
-        el('div', { className: 'bar__fill', style: `width:${Math.max(4, (c.cents / max) * 100)}%` }),
-      );
-      bar.append(
-        el('span', { textContent: `${c.emoji || '📦'} ${c.name || '未分类'}` }),
-        track,
-        el('span', {
-          className: 'bar__value',
-          textContent: `${Math.round((c.cents / sum) * 100)}%`,
-        }),
-      );
-      bars.append(bar);
+    res = await fetch(path, init);
+  } catch (err) {
+    // 断网：GET 用缓存顶上，别把人踢回登录页
+    if (method === 'GET') {
+      const cached = localStorage.getItem(`cache:${path}`);
+      if (cached) return JSON.parse(cached);
     }
-    view.append(bars);
-  } else {
-    view.append(el('div', { className: 'empty', textContent: '这个月还没有支出。' }));
+    throw err;
   }
 
-  if (s.byMember && s.byMember.length) {
-    view.append(el('h3', { className: 'section-title', textContent: '各花了多少' }));
-    const people = new Map();
-    for (const m of s.byMember) {
-      if (!people.has(m.id)) people.set(m.id, { name: m.display_name, expense: 0, income: 0 });
-      people.get(m.id)[m.direction] = m.cents;
+  let data = {};
+  try {
+    data = await res.json();
+  } catch {
+    data = {};
+  }
+
+  if (!res.ok) {
+    if (res.status === 401 && !path.startsWith('/api/auth')) {
+      onUnauthorized();
+      throw new Error('未登录');
     }
-    for (const p of people.values()) {
-      const row = el('div', { className: 'memrow' });
-      row.append(
-        el('span', { className: 'avatar', textContent: [...p.name][0] || '?' }),
-        el('div', { style: 'flex:1' }, [
-          el('div', { className: 'memrow__name', textContent: p.name }),
-          el('div', {
-            className: 'memrow__meta',
-            textContent: `收入 ¥${money(p.income)}`,
-          }),
-        ]),
-        el('div', { className: 'memrow__name', textContent: `支出 ¥${money(p.expense)}` }),
-      );
-      view.append(row);
+    const err = new Error(data.message || `请求失败 (${res.status})`);
+    err.status = res.status;
+    err.data = data;
+    throw err;
+  }
+
+  if (method === 'GET') {
+    try {
+      localStorage.setItem(`cache:${path}`, JSON.stringify(data));
+    } catch {
+      /* ignore */
     }
   }
+  return data;
 }
 
-/** 每天的支出柱状条（纯 CSS，无依赖，随宽度自适应） */
-function renderSpark(byDay) {
-  const [y, m] = state.month.split('-').map(Number);
-  const days = new Date(y, m, 0).getDate();
-  const vals = new Array(days).fill(0);
-  for (const r of byDay) {
-    if (r.direction !== 'expense') continue;
-    const i = Number(String(r.day).slice(8, 10)) - 1;
-    if (i >= 0 && i < days) vals[i] += r.cents;
-  }
-  const max = Math.max(...vals, 1);
+/* ------------------------------------------------------------------ 状态 */
 
-  const bars = el('div', { className: 'spark' });
-  vals.forEach((v, i) => {
-    const col = el('div', {
-      className: 'spark__col',
-      title: `${i + 1} 日 · ¥${money(v)}`,
+const state = {
+  view: 'add',
+  month: monthStr(),
+  scope: 'all', // all | me | <memberId>
+  me: null,
+  members: [],
+  categories: [],
+  entries: [],
+  stats: null,
+  entriesLoading: false,
+  statsLoading: false,
+  listError: '',
+  filters: { keyword: '', direction: 'all', category: 'all' },
+  draft: {
+    cents: 0,
+    direction: 'expense',
+    categoryId: null,
+    note: '',
+    date: todayStr(),
+  },
+  saving: false,
+  invite: null,
+  inviteTimer: null,
+};
+
+const scopedMemberId = () => (state.scope === 'all' || state.scope === 'me' ? '' : state.scope);
+
+/* ------------------------------------------------------------ 顶部小提示 */
+
+let toastTimer = null;
+function toast(message, action) {
+  const el = $('#toast');
+  el.hidden = false;
+  el.innerHTML = `<span>${message}</span>`;
+  if (action) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'toast__action';
+    btn.textContent = action.label;
+    btn.addEventListener('click', () => {
+      hideToast();
+      action.run();
     });
-    const bar = el('div', { className: 'spark__bar' });
-    // 用平方根压一下极端值，小额的日子也能看出来
-    bar.style.height = v ? `${Math.round(6 + 94 * Math.sqrt(v / max))}%` : '3px';
-    if (v && v === max) bar.classList.add('is-peak');
-    col.append(bar);
-    bars.append(col);
-  });
-
-  const axis = el('div', { className: 'spark__axis' }, [
-    el('span', { textContent: '1 日' }),
-    el('span', { textContent: `本月累计 ¥${money(vals.reduce((a, b) => a + b, 0))}` }),
-    el('span', { textContent: `${days} 日` }),
-  ]);
-
-  return el('div', { className: 'sparkbox' }, [bars, axis]);
-}
-
-/* ------------------------------------------------------------------ 我的 */
-
-function renderMe(view) {
-  const u = state.user;
-
-  const profile = el('div', { className: 'panel' });
-  const prow = el('div', { className: 'profile' });
-  prow.append(
-    el('span', { className: 'avatar', textContent: [...(u.displayName || u.username)][0] || '?' }),
-    el('div', {}, [
-      el('b', { textContent: u.displayName || u.username }),
-      el('small', { textContent: `@${u.username} · ${u.householdName || '我的账本'}` }),
-    ]),
-  );
-  profile.append(prow);
-  view.append(profile);
-
-  if (state.members.length) {
-    const members = el('div', { className: 'panel' });
-    members.append(el('h3', { textContent: `账本成员（${state.members.length}）` }));
-    for (const mem of state.members) {
-      const row = el('div', { className: 'memrow' });
-      row.style.background = 'transparent';
-      row.style.border = '0';
-      row.style.padding = '8px 0';
-      row.append(
-        el('span', { className: 'avatar', textContent: [...(mem.display_name || '?')][0] }),
-        el('div', { style: 'flex:1' }, [
-          el('div', { className: 'memrow__name', textContent: mem.display_name }),
-          el('div', {
-            className: 'memrow__meta',
-            textContent: mem.role === 'owner' ? '创建者' : '成员',
-          }),
-        ]),
-        mem.id === u.id ? el('span', { className: 'memrow__meta', textContent: '是你' }) : '',
-      );
-      members.append(row);
-    }
-    view.append(members);
+    el.appendChild(btn);
   }
-
-  const inviteCard = el('div', { className: 'panel' });
-  inviteCard.append(el('h3', { textContent: '把家人拉进来' }));
-  const hint = el('p', {
-    className: 'muted',
-    textContent: '生成一个 10 分钟内有效的邀请码，对方注册后输入即可。',
-  });
-  const codeBox = el('div', { className: 'invite-code' });
-  const genBtn = el('button', { type: 'button', className: 'btn btn--primary btn--sm', textContent: '生成邀请码' });
-  genBtn.onclick = async () => {
-    try {
-      genBtn.disabled = true;
-      const data = await api('POST', '/api/household/invite');
-      codeBox.textContent = data.code;
-      let left = data.ttlSeconds ?? 600;
-      const tick = () => {
-        hint.textContent =
-          left > 0 ? `${Math.floor(left / 60)} 分 ${left % 60} 秒后失效` : '邀请码已失效，重新生成一个';
-        if (left <= 0) clearInterval(timer);
-        left -= 1;
-      };
-      tick();
-      const timer = setInterval(tick, 1000);
-      codeBox.onclick = () => {
-        navigator.clipboard?.writeText(data.code).then(
-          () => toast('邀请码已复制'),
-          () => {},
-        );
-      };
-    } catch (e) {
-      toast(e.message);
-    } finally {
-      genBtn.disabled = false;
-    }
-  };
-  inviteCard.append(hint, codeBox, genBtn);
-  view.append(inviteCard);
-
-  const joinCard = el('div', { className: 'panel' });
-  joinCard.append(el('h3', { textContent: '我拿到了邀请码' }));
-  const row = el('div', { className: 'invite-row' });
-  const input = el('input', { type: 'text', placeholder: '6 位邀请码', maxLength: 8 });
-  const joinBtn = el('button', { type: 'button', className: 'btn btn--ghost btn--sm', textContent: '加入账本' });
-  joinBtn.onclick = async () => {
-    try {
-      joinBtn.disabled = true;
-      await api('POST', '/api/household/join', { code: input.value.trim() });
-      toast('已加入，账现在合在一起了');
-      await boot();
-    } catch (e) {
-      toast(e.message);
-    } finally {
-      joinBtn.disabled = false;
-    }
-  };
-  row.append(input, joinBtn);
-  joinCard.append(row);
-  view.append(joinCard);
-
-  const account = el('div', { className: 'panel' });
-  account.append(el('h3', { textContent: '账号' }));
-  const outBtn = el('button', { type: 'button', className: 'btn btn--ghost btn--sm', textContent: '退出登录' });
-  outBtn.onclick = async () => {
-    await api('POST', '/api/auth/logout').catch(() => {});
-    location.reload();
-  };
-  account.append(outBtn);
-  view.append(account);
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(hideToast, action ? 6000 : 2600);
 }
 
-/* -------------------------------------------------------------- 单笔详情 */
-
-function openEntryModal(item) {
-  const modal = $('#modal');
-  const card = el('div', { className: 'modal__card' });
-
-  card.append(
-    el('h3', {
-      textContent: (item.direction === 'income' ? '+' : '−') + '¥' + money(item.amount_cents),
-    }),
-    el('p', {
-      className: 'muted',
-      textContent: `${item.category_emoji || ''} ${item.category_name || '未分类'} · ${item.occurred_on} · ${
-        item.author_name
-      }`,
-    }),
-  );
-  if (item.note) card.append(el('p', { textContent: item.note }));
-
-  const actions = el('div', { className: 'modal__actions' });
-  const edit = el('button', { type: 'button', className: 'btn btn--ghost', textContent: '改一下' });
-  edit.onclick = () => openEditModal(item);
-  const del = el('button', { type: 'button', className: 'btn btn--ghost', textContent: '删除' });
-  del.style.color = '#a92e26';
-  del.onclick = async () => {
-    try {
-      await api('DELETE', `/api/entries/${item.id}`);
-      closeModal();
-      toast('已删除');
-      render();
-    } catch (e) {
-      toast(e.message);
-    }
-  };
-  actions.append(del, edit);
-  card.append(actions);
-
-  const close = el('button', { type: 'button', className: 'btn btn--primary btn--block', textContent: '知道了' });
-  close.style.marginTop = '8px';
-  close.onclick = closeModal;
-  card.append(close);
-
-  modal.replaceChildren(card);
-  modal.hidden = false;
-  modal.onclick = (e) => {
-    if (e.target === modal) closeModal();
-  };
+function hideToast() {
+  const el = $('#toast');
+  el.hidden = true;
+  el.innerHTML = '';
 }
 
-function openEditModal(item) {
+/* ------------------------------------------------------------------ 弹层 */
+
+function openModal(html) {
   const modal = $('#modal');
-  const card = el('div', { className: 'modal__card' });
-  card.append(el('h3', { textContent: '改一下' }));
-
-  const labelled = (text, control) => {
-    const wrap = el('div', { className: 'modal__field' });
-    wrap.append(el('label', { className: 'modal__label', textContent: text }), control);
-    return wrap;
-  };
-
-  const amount = el('input', {
-    type: 'number',
-    step: '0.01',
-    min: '0.01',
-    value: (item.amount_cents / 100).toFixed(2),
-    'aria-label': '金额',
-  });
-
-  const note = el('input', {
-    type: 'text',
-    placeholder: '比如：楼下面馆',
-    maxLength: 120,
-    value: item.note || '',
-    'aria-label': '备注',
-  });
-
-  const select = el('select', { 'aria-label': '分类' });
-  select.className = 'modal__select';
-  for (const c of state.categories.filter((x) => x.direction === item.direction)) {
-    const opt = el('option', { value: String(c.id), textContent: `${c.emoji} ${c.name}` });
-    if (c.id === item.category_id) opt.selected = true;
-    select.append(opt);
-  }
-
-  const date = el('input', { type: 'date', value: item.occurred_on, 'aria-label': '日期' });
-
-  const amountField = labelled('金额', amount);
-  const noteField = labelled('备注', note);
-  const catField = labelled('分类', select);
-  const dateField = labelled('日期', date);
-
-  card.append(amountField, noteField, catField, dateField);
-
-  const actions = el('div', { className: 'modal__actions' });
-  const cancel = el('button', { type: 'button', className: 'btn btn--ghost', textContent: '取消' });
-  cancel.onclick = closeModal;
-  const save = el('button', { type: 'button', className: 'btn btn--primary', textContent: '保存' });
-  save.onclick = async () => {
-    const yuan = Number(amount.value);
-    if (!Number.isFinite(yuan) || yuan <= 0) return toast('金额要大于 0');
-    try {
-      save.disabled = true;
-      await api('PATCH', `/api/entries/${item.id}`, {
-        amountCents: Math.round(yuan * 100),
-        note: note.value.trim(),
-        categoryId: Number(select.value),
-        occurredOn: date.value,
-      });
-      closeModal();
-      toast('已保存');
-      render();
-    } catch (e) {
-      toast(e.message);
-      save.disabled = false;
-    }
-  };
-  actions.append(cancel, save);
-  card.append(actions);
-
-  modal.replaceChildren(card);
+  modal.innerHTML = `<div class="modal__card" role="dialog" aria-modal="true">${html}</div>`;
   modal.hidden = false;
+  const focusable = $('input, select, button', modal);
+  if (focusable) setTimeout(() => focusable.focus(), 30);
 }
 
 function closeModal() {
-  $('#modal').hidden = true;
+  const modal = $('#modal');
+  modal.hidden = true;
+  modal.innerHTML = '';
 }
 
-/* -------------------------------------------------------------- 交互工具 */
+$('#modal').addEventListener('click', (e) => {
+  if (e.target.id === 'modal') closeModal();
+});
 
-function toast(msg) {
-  const t = $('#toast');
-  t.textContent = msg;
-  t.hidden = false;
-  clearTimeout(toast._timer);
-  toast._timer = setTimeout(() => {
-    t.hidden = true;
-  }, 2400);
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !$('#modal').hidden) closeModal();
+});
+
+/* ================================================================== 登录 */
+
+const authMode = { mode: 'login' };
+
+function setAuthMode(mode) {
+  authMode.mode = mode;
+  const seg = $('#authMode');
+  seg.dataset.mode = mode;
+  $$('.segmented__btn', seg).forEach((b) => {
+    const on = b.dataset.mode === mode;
+    b.classList.toggle('is-active', on);
+    b.setAttribute('aria-selected', String(on));
+  });
+  const isReg = mode === 'register';
+  $('#authTitle').textContent = isReg ? '创建你的账本' : '欢迎回来';
+  $('#authSub').textContent = isReg ? '填一个用户名和密码就能开始，稍后再邀请家人' : '用你注册时的用户名和密码登录';
+  $('#displayNameField').hidden = !isReg;
+  $('#authSubmitText').textContent = isReg ? '创建账号' : '登录';
+  $('#password').setAttribute('autocomplete', isReg ? 'new-password' : 'current-password');
+  $('#authSubmit').dataset.mode = mode;
+  clearAuthError();
+  syncAuthButton();
 }
+
+function clearAuthError() {
+  const box = $('#authError');
+  box.hidden = true;
+  box.textContent = '';
+}
+
+function showAuthError(msg) {
+  const box = $('#authError');
+  box.textContent = msg;
+  box.hidden = false;
+}
+
+function authValidity() {
+  const username = $('#username').value.trim();
+  const password = $('#password').value;
+  const displayName = $('#displayName').value.trim();
+  if (username.length < 3) return { ok: false, reason: '用户名至少 3 位' };
+  if (password.length < 8) return { ok: false, reason: '密码至少 8 位' };
+  if (authMode.mode === 'register' && displayName.length < 1) return { ok: false, reason: '写一个家里叫你的名字' };
+  return { ok: true, username, password, displayName };
+}
+
+function syncAuthButton() {
+  const v = authValidity();
+  const btn = $('#authSubmit');
+  btn.disabled = !v.ok;
+  if (!v.ok) $('#authHint').textContent = v.reason;
+  else
+    $('#authHint').textContent =
+      authMode.mode === 'register' ? '注册后可以在「我的」里生成邀请码，把家人拉进来' : '还没有账号？切到「注册」，10 秒就好。';
+}
+
+function showAuth() {
+  closeModal();
+  $('#appScreen').hidden = true;
+  $('#authScreen').hidden = false;
+  document.body.classList.remove('is-app');
+  setAuthMode('login');
+  $('#password').value = '';
+  setTimeout(() => $('#username').focus(), 50);
+}
+
+function showApp() {
+  $('#authScreen').hidden = true;
+  $('#appScreen').hidden = false;
+  document.body.classList.add('is-app');
+}
+
+$('#authMode').addEventListener('click', (e) => {
+  const btn = e.target.closest('.segmented__btn');
+  if (!btn) return;
+  setAuthMode(btn.dataset.mode);
+});
+
+$('#peekPassword').addEventListener('click', () => {
+  const input = $('#password');
+  const on = input.type === 'password';
+  input.type = on ? 'text' : 'password';
+  $('#peekPassword').classList.toggle('is-on', on);
+  $('#peekPassword').setAttribute('aria-label', on ? '隐藏密码' : '显示密码');
+  input.focus();
+});
+
+['#username', '#password', '#displayName'].forEach((sel) => {
+  $(sel).addEventListener('input', () => {
+    clearAuthError();
+    syncAuthButton();
+  });
+});
+
+$('#authForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const v = authValidity();
+  if (!v.ok) {
+    showAuthError(v.reason);
+    return;
+  }
+
+  const btn = $('#authSubmit');
+  const label = $('#authSubmitText');
+  const original = label.textContent;
+  btn.classList.add('is-loading');
+  btn.disabled = true;
+  label.textContent = authMode.mode === 'register' ? '正在创建…' : '正在登录…';
+  clearAuthError();
+
+  try {
+    const authHash = await deriveAuthHash(v.username, v.password);
+    if (authMode.mode === 'register') {
+      await api('POST', '/api/auth/register', {
+        username: v.username,
+        displayName: v.displayName,
+        authHash,
+      });
+    } else {
+      await api('POST', '/api/auth/login', { username: v.username, authHash });
+    }
+    await boot();
+  } catch (err) {
+    const status = err.status;
+    if (status === 401) showAuthError('用户名或密码不对，再试一次');
+    else if (status === 409) showAuthError('这个用户名已经有人用了，换一个');
+    else if (looksOffline(err)) showAuthError('网络不通，连上再试');
+    else showAuthError(err.message || '出了点问题，再试一次');
+  } finally {
+    btn.classList.remove('is-loading');
+    label.textContent = original;
+    syncAuthButton();
+  }
+});
+
+/* ================================================================== 启动 */
+
+async function boot() {
+  try {
+    const [me, cats] = await Promise.all([api('GET', '/api/me'), api('GET', '/api/categories')]);
+    state.me = me.user;
+    state.members = me.members || [];
+    state.categories = cats.categories || [];
+    showApp();
+    paintShell();
+    if (!state.draft.categoryId) {
+      const first = state.categories.find((c) => c.direction === state.draft.direction);
+      if (first) state.draft.categoryId = first.id;
+    }
+    setView(state.view, { silent: true });
+    await Promise.all([loadEntries(), loadStats()]);
+    flushOutbox();
+  } catch (err) {
+    if (err.message === '未登录') showAuth();
+    else if (looksOffline(err)) showAuth();
+    else showAuth();
+  }
+}
+
+function paintShell() {
+  const name = state.me?.displayName || state.me?.username || '—';
+  $('#sideHousehold').textContent = state.me?.householdName || '家庭记账本';
+  $('#sideUserName').textContent = name;
+  $('#sideAvatar').textContent = name.slice(0, 1);
+  const isOwner = state.me?.role === 'owner';
+  $('#sideRole').textContent = isOwner ? '账本创建者' : '家庭成员';
+  $('#monthLabel').textContent = fmtMonthCN(state.month);
+  paintScope();
+}
+
+function paintScope() {
+  const btn = $('#scopeToggle');
+  btn.dataset.scope = state.scope;
+  $('#scopeText').textContent =
+    state.scope === 'all'
+      ? '全家'
+      : state.scope === 'me'
+        ? '只看我'
+        : state.members.find((m) => String(m.id) === String(state.scope))?.display_name || '全家';
+}
+
+/* ================================================================== 导航 */
+
+function setView(name, { silent = false } = {}) {
+  state.view = name;
+  $$('.nav__item').forEach((b) => {
+    const on = b.dataset.view === name;
+    b.classList.toggle('is-active', on);
+    b.setAttribute('aria-selected', String(on));
+  });
+  if (!silent) window.scrollTo({ top: 0, behavior: 'smooth' });
+  render();
+}
+
+$$('.nav__item').forEach((btn) => btn.addEventListener('click', () => setView(btn.dataset.view)));
+$('#sideUser').addEventListener('click', () => setView('me'));
+
+$('#monthPrev').addEventListener('click', () => shiftMonth(-1));
+$('#monthNext').addEventListener('click', () => shiftMonth(1));
+$('#monthLabel').addEventListener('click', () => {
+  state.month = monthStr();
+  $('#monthLabel').textContent = fmtMonthCN(state.month);
+  loadEntries();
+  loadStats();
+  render();
+});
 
 function shiftMonth(delta) {
   const [y, m] = state.month.split('-').map(Number);
   const d = new Date(y, m - 1 + delta, 1);
-  state.month = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  state.month = `${d.getFullYear()}-${pad(d.getMonth() + 1)}`;
+  $('#monthLabel').textContent = fmtMonthCN(state.month);
+  loadEntries();
+  loadStats();
   render();
 }
 
-/* ------------------------------------------------------------------ 绑定 */
+$('#scopeToggle').addEventListener('click', () => {
+  state.scope = state.scope === 'all' ? 'me' : 'all';
+  paintScope();
+  loadEntries();
+  loadStats();
+  render();
+});
 
-function bind() {
-  for (const sel of ['#username', '#password', '#displayName']) {
-    $(sel).addEventListener('input', syncAuthButton);
+/* ================================================================== 数据 */
+
+async function loadEntries() {
+  state.entriesLoading = true;
+  state.listError = '';
+  render();
+  try {
+    const q = new URLSearchParams({ month: state.month, member: state.scope });
+    const data = await api('GET', `/api/entries?${q}`);
+    state.entries = data.entries || [];
+  } catch (err) {
+    state.listError = looksOffline(err) ? '网络不通，显示的是上次的数据' : err.message;
+  } finally {
+    state.entriesLoading = false;
+    if (state.view === 'list' || state.view === 'stats') render();
   }
-  syncAuthButton();
+}
 
-  $('#authForm').addEventListener('submit', submitAuth);
-
-  for (const b of document.querySelectorAll('.segmented__btn')) {
-    b.addEventListener('click', () => setAuthMode(b.dataset.mode));
+async function loadStats() {
+  state.statsLoading = true;
+  try {
+    const q = new URLSearchParams({ month: state.month, member: state.scope });
+    state.stats = await api('GET', `/api/stats?${q}`);
+  } catch {
+    state.stats = null;
+  } finally {
+    state.statsLoading = false;
+    if (state.view === 'stats') render();
   }
+}
 
-  const peek = $('#peekPassword');
-  if (peek) {
-    peek.addEventListener('click', () => {
-      const input = $('#password');
-      const show = input.type === 'password';
-      input.type = show ? 'text' : 'password';
-      peek.classList.toggle('is-on', show);
-      peek.setAttribute('aria-label', show ? '隐藏密码' : '显示密码');
-    });
+/* ------------------------------------------------------------- 筛选逻辑 */
+
+const filterActive = () =>
+  Boolean(state.filters.keyword.trim()) ||
+  state.filters.direction !== 'all' ||
+  state.filters.category !== 'all';
+
+function filteredEntries() {
+  const kw = state.filters.keyword.trim().toLowerCase();
+  return state.entries.filter((e) => {
+    if (state.filters.direction !== 'all' && e.direction !== state.filters.direction) return false;
+    if (state.filters.category !== 'all' && String(e.category_id) !== String(state.filters.category)) return false;
+    if (kw) {
+      const hay = `${e.note || ''} ${e.category_name} ${e.author_name}`.toLowerCase();
+      if (!hay.includes(kw)) return false;
+    }
+    return true;
+  });
+}
+
+function sumOf(list, direction) {
+  return list.filter((e) => e.direction === direction).reduce((s, e) => s + e.amount_cents, 0);
+}
+
+/* ================================================================== 渲染 */
+
+function render() {
+  const view = $('#view');
+  if (!view) return;
+  view.classList.toggle('view--add', state.view === 'add');
+  if (state.view === 'add') view.innerHTML = renderAdd();
+  else if (state.view === 'list') view.innerHTML = renderList();
+  else if (state.view === 'stats') view.innerHTML = renderStats();
+  else view.innerHTML = renderMe();
+  bindView();
+}
+
+/* ---------------------------------------------------------------- 记一笔 */
+
+function renderAdd() {
+  const d = state.draft;
+  const cats = state.categories.filter((c) => c.direction === d.direction);
+  const amount = fmtMoney(d.cents, { symbol: false });
+  const canSave = d.cents > 0 && d.categoryId;
+  const note = !d.cents
+    ? '先按上面的数字键输入金额'
+    : !d.categoryId
+      ? '选一个分类才能保存'
+      : '';
+
+  return `
+    <div class="compose">
+      <section class="card compose__left">
+        <div class="amount">
+          <span class="amount__cur">¥</span>
+          <span class="amount__value ${d.cents ? '' : 'is-zero'}">${amount}</span>
+        </div>
+        <div class="keypad">
+          ${['1', '2', '3', '4', '5', '6', '7', '8', '9', '00', '0']
+            .map((k) => `<button type="button" class="key" data-key="${k}">${k}</button>`)
+            .join('')}
+          <button type="button" class="key" data-key="del" aria-label="退格">${icon('backspace')}</button>
+        </div>
+      </section>
+
+      <section class="card compose__right">
+        <div class="direction" role="group" aria-label="收支类型">
+          <button type="button" data-dir="expense" aria-pressed="${d.direction === 'expense'}">支出</button>
+          <button type="button" data-dir="income" aria-pressed="${d.direction === 'income'}">收入</button>
+        </div>
+
+        <div class="catgrid">
+          ${cats
+            .map(
+              (c) => `<button type="button" class="cat" data-cat="${c.id}" aria-pressed="${String(d.categoryId) === String(c.id)}">
+                  <span class="cat__icon">${catIcon(c.name)}</span>
+                  <span>${c.name}</span>
+                </button>`,
+            )
+            .join('')}
+        </div>
+
+        <div class="compose__meta">
+          <input class="input" id="draftNote" placeholder="备注（可空）" maxlength="40" value="${escapeAttr(d.note)}" />
+          <input class="input input--date" id="draftDate" type="date" value="${d.date}" />
+        </div>
+
+        <div class="chips">
+          <button type="button" class="chip" data-date-offset="0">今天</button>
+          <button type="button" class="chip" data-date-offset="-1">昨天</button>
+          <button type="button" class="chip" data-date-offset="-2">前天</button>
+        </div>
+
+        <div class="savebar">
+          <button type="button" class="btn btn--primary btn--block" id="saveEntry" ${canSave && !state.saving ? '' : 'disabled'}>
+            <span class="btn__label">${d.direction === 'expense' ? '记下这笔支出' : '记下这笔收入'}</span>
+            <span class="btn__spinner" aria-hidden="true"></span>
+          </button>
+          <p class="savenote" id="saveNote">${note || saveHint()}</p>
+        </div>
+      </section>
+    </div>
+    ${renderRecent()}
+  `;
+}
+
+/* 首页底部：本月最近几笔，没有就提示一句 */
+function renderRecent() {
+  const list = [...state.entries].sort((a, b) => (a.occurred_on < b.occurred_on ? 1 : -1)).slice(0, 5);
+  if (!list.length) {
+    return `<section class="section-title">这个月还没记账</section>
+      <p class="muted">按下上面的数字键记第一笔，月底就能看到钱去哪了。</p>`;
   }
+  return `<div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px">
+      <h3 class="section-title" style="margin-bottom:10px">最近记的</h3>
+      <button type="button" class="btn btn--ghost btn--sm" data-jump="list">全部明细</button>
+    </div>
+    <div class="rows">
+      ${list
+        .map(
+          (e) => `<button type="button" class="row" data-entry="${e.id}">
+            <span class="row__icon ${e.direction === 'income' ? 'row__icon--income' : ''}">${catIcon(e.category_name)}</span>
+            <span class="row__main">
+              <span class="row__title">${escapeAttr(e.note || e.category_name)}</span>
+              <span class="row__sub">${e.occurred_on.slice(5)} · ${escapeAttr(e.author_name || '')}</span>
+            </span>
+            <span class="row__amount ${e.direction === 'income' ? 'row__amount--income' : ''}">${e.direction === 'income' ? '+' : '−'}${fmtMoney(e.amount_cents, { symbol: false })}</span>
+          </button>`,
+        )
+        .join('')}
+    </div>`;
+}
 
-  for (const item of document.querySelectorAll('.nav__item')) {
-    item.addEventListener('click', () => {
-      state.view = item.dataset.view;
+function escapeAttr(v) {
+  return String(v ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+}
+
+/* ------------------------------------------------------------------ 明细 */
+
+function renderList() {
+  const rows = filteredEntries();
+  const expense = sumOf(rows, 'expense');
+  const income = sumOf(rows, 'income');
+  const balance = income - expense;
+
+  const memberOptions = [
+    { value: 'all', label: '全家' },
+    { value: 'me', label: '只看我' },
+    ...state.members.map((m) => ({ value: String(m.id), label: m.display_name })),
+  ];
+  const catOptions = [
+    { value: 'all', label: '全部分类' },
+    ...state.categories.map((c) => ({ value: String(c.id), label: c.name })),
+  ];
+
+  return `
+    <div class="summary">
+      <button type="button" class="summary__cell" data-jump="expense">
+        <span class="summary__label">本月支出</span>
+        <span class="summary__value">${fmtMoney(expense)}</span>
+        <span class="summary__hint">${rows.filter((e) => e.direction === 'expense').length} 笔</span>
+      </button>
+      <button type="button" class="summary__cell" data-jump="income">
+        <span class="summary__label">本月收入</span>
+        <span class="summary__value summary__value--income">${fmtMoney(income)}</span>
+        <span class="summary__hint">${rows.filter((e) => e.direction === 'income').length} 笔</span>
+      </button>
+      <button type="button" class="summary__cell" data-jump="stats">
+        <span class="summary__label">本月结余</span>
+        <span class="summary__value summary__value--muted">${fmtMoney(balance, { sign: true })}</span>
+        <span class="summary__hint">收入 − 支出</span>
+      </button>
+    </div>
+
+    <div class="toolbar">
+      <div class="toolbar__row">
+        <span class="searchbox">
+          ${icon('search')}
+          <input id="searchInput" placeholder="搜备注、分类或人" value="${escapeAttr(state.filters.keyword)}" />
+        </span>
+        <select class="select" id="filterMember">
+          ${memberOptions
+            .map((o) => `<option value="${o.value}" ${state.scope === o.value ? 'selected' : ''}>${o.label}</option>`)
+            .join('')}
+        </select>
+      </div>
+      <div class="toolbar__row">
+        <select class="select" id="filterDirection">
+          ${[
+            ['all', '收支不限'],
+            ['expense', '只看支出'],
+            ['income', '只看收入'],
+          ]
+            .map(([v, l]) => `<option value="${v}" ${state.filters.direction === v ? 'selected' : ''}>${l}</option>`)
+            .join('')}
+        </select>
+        <select class="select" id="filterCategory">
+          ${catOptions
+            .map((o) => `<option value="${o.value}" ${state.filters.category === o.value ? 'selected' : ''}>${o.label}</option>`)
+            .join('')}
+        </select>
+        ${filterActive() ? '<button type="button" class="btn btn--ghost btn--sm" id="clearFilters">清空筛选</button>' : ''}
+      </div>
+    </div>
+
+    ${state.listError ? `<p class="hint">${state.listError}</p>` : ''}
+    ${state.entriesLoading && !rows.length ? '<p class="loading">正在读取这个月的账目…</p>' : ''}
+    ${!state.entriesLoading && !rows.length ? emptyBlock() : ''}
+    ${rows.length ? groupRows(rows) : ''}
+  `;
+}
+
+function emptyBlock() {
+  if (filterActive()) {
+    return `<div class="empty">
+      <span class="empty__icon">${icon('search')}</span>
+      <b>这些条件下没有账目</b>
+      <span>换个关键词，或者清空筛选试试。</span>
+    </div>`;
+  }
+  return `<div class="empty">
+    <span class="empty__icon">${icon('empty')}</span>
+    <b>${fmtMonthCN(state.month)}还没有记账</b>
+    <span>记一笔，月底就知道钱去哪了。</span>
+    <button type="button" class="btn btn--primary btn--sm" data-goto="add">记一笔</button>
+  </div>`;
+}
+
+function groupRows(rows) {
+  const groups = new Map();
+  rows.forEach((e) => {
+    if (!groups.has(e.occurred_on)) groups.set(e.occurred_on, []);
+    groups.get(e.occurred_on).push(e);
+  });
+  const days = [...groups.keys()].sort((a, b) => (a < b ? 1 : -1));
+
+  return days
+    .map((day) => {
+      const list = groups.get(day);
+      const exp = sumOf(list, 'expense');
+      const inc = sumOf(list, 'income');
+      const parts = [];
+      if (exp) parts.push(`支出 ${fmtMoney(exp)}`);
+      if (inc) parts.push(`收入 ${fmtMoney(inc)}`);
+      return `<section class="daygroup">
+        <header class="daygroup__head">
+          <span>${dayLabel(day)}</span>
+          <span class="daygroup__sum">${parts.join(' · ')}</span>
+        </header>
+        <div class="rows">
+          ${list
+            .map(
+              (e) => `<button type="button" class="row" data-entry="${e.id}">
+                <span class="row__icon ${e.direction === 'income' ? 'row__icon--income' : ''}">${catIcon(e.category_name)}</span>
+                <span class="row__main">
+                  <span class="row__title">${escapeAttr(e.note || e.category_name)}</span>
+                  <span class="row__sub">${e.note ? `${e.category_name} · ${escapeAttr(e.author_name || '')}` : escapeAttr(e.author_name || '')}</span>
+                </span>
+                <span class="row__amount ${e.direction === 'income' ? 'row__amount--income' : ''}">
+                  ${e.direction === 'income' ? '+' : '−'}${fmtMoney(e.amount_cents, { symbol: false })}
+                </span>
+              </button>`,
+            )
+            .join('')}
+        </div>
+      </section>`;
+    })
+    .join('');
+}
+
+/* ------------------------------------------------------------------ 统计 */
+
+function renderStats() {
+  const s = state.stats;
+  if (state.statsLoading && !s) return '<p class="loading">正在算这个月的账…</p>';
+  if (!s) return '<p class="loading">暂时拿不到统计数据</p>';
+
+  const total = s.total || { expense: 0, income: 0, balance: 0 };
+  const empty = !total.expense && !total.income;
+
+  const monthDays = Number(state.month.split('-')[1]);
+  const daysInMonth = new Date(Number(state.month.slice(0, 4)), monthDays, 0).getDate();
+  const byDay = new Map();
+  (s.byDay || []).forEach((d) => {
+    if (d.direction !== 'expense') return;
+    const key = String(d.day).slice(-2);
+    byDay.set(key, (byDay.get(key) || 0) + d.cents);
+  });
+  const dayMax = Math.max(1, ...[...byDay.values()]);
+  const dayBars = Array.from({ length: daysInMonth }, (_, i) => {
+    const key = pad(i + 1);
+    const cents = byDay.get(key) || 0;
+    const h = cents ? Math.max(7, Math.round((cents / dayMax) * 100)) : 2;
+    return `<div class="spark__col" title="${Number(key)} 日 ${fmtMoney(cents)}">
+      <div class="spark__bar ${cents === dayMax && cents ? 'is-peak' : ''}" style="height:${cents ? h : 2}%"></div>
+    </div>`;
+  }).join('');
+
+  const cats = (s.byCategory || []).filter((c) => c.direction === 'expense').sort((a, b) => b.cents - a.cents);
+  const catMax = Math.max(1, ...cats.map((c) => c.cents));
+  const catTotal = cats.reduce((acc, c) => acc + c.cents, 0) || 1;
+
+  const members = new Map();
+  (s.byMember || []).forEach((m) => {
+    const cur = members.get(String(m.id)) || { id: m.id, name: m.display_name, expense: 0, income: 0 };
+    if (m.direction === 'expense') cur.expense += m.cents;
+    else cur.income += m.cents;
+    members.set(String(m.id), cur);
+  });
+  const memberList = [...members.values()].sort((a, b) => b.expense - a.expense);
+
+  return `
+    <div class="summary">
+      <button type="button" class="summary__cell" data-jump="list">
+        <span class="summary__label">本月支出</span>
+        <span class="summary__value">${fmtMoney(total.expense)}</span>
+      </button>
+      <button type="button" class="summary__cell" data-jump="list">
+        <span class="summary__label">本月收入</span>
+        <span class="summary__value summary__value--income">${fmtMoney(total.income)}</span>
+      </button>
+      <button type="button" class="summary__cell" data-jump="list">
+        <span class="summary__label">本月结余</span>
+        <span class="summary__value summary__value--muted">${fmtMoney(total.balance, { sign: true })}</span>
+        <span class="summary__hint">收入 − 支出</span>
+      </button>
+    </div>
+
+    ${
+      empty
+        ? `<div class="empty" style="margin-top:16px">
+            <span class="empty__icon">${icon('trend')}</span>
+            <b>这个月还没有数据</b>
+            <span>记上几笔，这里就会长出趋势图。</span>
+            <button type="button" class="btn btn--primary btn--sm" data-goto="add">记一笔</button>
+          </div>`
+        : `
+        <h3 class="section-title">每天花了多少</h3>
+        <div class="sparkbox">
+          <div class="spark">${dayBars}</div>
+          <div class="spark__axis">
+            <span>1 日</span>
+            <span>本月累计 ${fmtMoney(total.expense)}</span>
+            <span>${daysInMonth} 日</span>
+          </div>
+        </div>
+
+        <h3 class="section-title">钱花在哪了</h3>
+        ${
+          cats.length
+            ? `<div class="bars">
+                ${cats
+                  .map(
+                    (c) => `<div class="bar">
+                      <span class="bar__name">${catIcon(c.name)}<span>${c.name}</span></span>
+                      <span class="bar__track"><span class="bar__fill" style="width:${Math.max(3, Math.round((c.cents / catMax) * 100))}%"></span></span>
+                      <span class="bar__value">${fmtMoney(c.cents)} · ${Math.round((c.cents / catTotal) * 100)}%</span>
+                    </div>`,
+                  )
+                  .join('')}
+              </div>`
+            : '<p class="muted">这个月还没有支出。</p>'
+        }
+
+        <h3 class="section-title">各花了多少</h3>
+        ${
+          memberList.length
+            ? `<div class="memlist">
+                ${memberList
+                  .map(
+                    (m) => `<div class="memrow">
+                      <span class="avatar">${escapeAttr((m.name || '?').slice(0, 1))}</span>
+                      <span style="flex:1;min-width:0">
+                        <span class="memrow__name">${escapeAttr(m.name)}</span>
+                        <span class="memrow__meta">收入 ${fmtMoney(m.income)}</span>
+                      </span>
+                      <span class="row__amount">${fmtMoney(m.expense)}</span>
+                    </div>`,
+                  )
+                  .join('')}
+              </div>`
+            : ''
+        }
+        <p class="trend-note">本月一共 ${memberList.length} 个人记了 ${state.entries.length} 笔账，平均每天 <b>${fmtMoney(Math.round(total.expense / daysInMonth))}</b>。</p>
+      `
+    }
+  `;
+}
+
+/* ------------------------------------------------------------------ 我的 */
+
+function renderMe() {
+  const me = state.me || {};
+  const name = me.displayName || me.username || '—';
+  const isOwner = me.role === 'owner';
+
+  return `
+    <div class="panel">
+      <div class="profile">
+        <span class="profile__avatar">${escapeAttr(name.slice(0, 1))}</span>
+        <div style="min-width:0">
+          <div class="profile__name">${escapeAttr(name)}</div>
+          <div class="profile__meta">@${escapeAttr(me.username || '')} · ${escapeAttr(me.householdName || '')}</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel__title">账本成员 <span class="muted">${state.members.length} 人</span></div>
+      <p class="panel__desc">同一个账本里的每个人都能看到全部账目，各自记自己的，随时合看。</p>
+      <div class="memlist">
+        ${state.members
+          .map(
+            (m) => `<div class="memrow">
+              <span class="avatar">${escapeAttr((m.display_name || '?').slice(0, 1))}</span>
+              <span style="flex:1;min-width:0">
+                <span class="memrow__name">${escapeAttr(m.display_name)}</span>
+                <span class="memrow__meta">${m.role === 'owner' ? '账本创建者' : '家庭成员'}</span>
+              </span>
+              ${String(m.id) === String(me.id) ? '<span class="muted">是你</span>' : ''}
+            </div>`,
+          )
+          .join('')}
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel__title">看账范围</div>
+      <p class="panel__desc">「全家」是账本里所有人的账；「只看我」只显示你记的那些。这个选择同时作用于明细和统计。</p>
+      <div class="scopechoice">
+        <button type="button" class="scopeoption ${state.scope === 'all' ? 'is-active' : ''}" data-scope="all">
+          全家<small>${state.members.length} 个人的账</small>
+        </button>
+        <button type="button" class="scopeoption ${state.scope === 'me' ? 'is-active' : ''}" data-scope="me">
+          只看我<small>只统计我记的</small>
+        </button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel__title">把家人拉进来</div>
+      <p class="panel__desc">${isOwner ? '生成一个邀请码，10 分钟内有效。' : '账本创建者可以生成邀请码；你也可以用别人的码加入另一本账。'}</p>
+      <div class="invite-code" id="inviteCode" title="点击复制">${state.invite ? state.invite.code : ''}</div>
+      ${
+        state.invite
+          ? `<p class="muted" id="inviteHint">还剩 ${state.invite.left} 秒失效${state.invite.copied ? ' · 已复制' : ' · 点数字可复制'}</p>`
+          : ''
+      }
+      <div class="stack">
+        <button type="button" class="btn btn--primary btn--sm" id="genInvite">${state.invite ? '换一个邀请码' : '生成邀请码'}</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel__title">我拿到了邀请码</div>
+      <p class="panel__desc">输入对方给的 6 位码，就会加入对方那本账。</p>
+      <div class="invite-row">
+        <input class="input" id="joinCode" placeholder="6 位邀请码" maxlength="6" autocapitalize="characters" />
+        <button type="button" class="btn btn--ghost btn--sm" id="joinHousehold">加入</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel__title">账号</div>
+      <p class="panel__desc">退出后需要重新输入用户名和密码，账目不会丢。</p>
+      <button type="button" class="btn btn--ghost btn--sm" id="logoutBtn">退出登录</button>
+    </div>
+  `;
+}
+
+/* ================================================================== 交互 */
+
+function bindView() {
+  const view = $('#view');
+
+  /* 记一笔 */
+  $$('.key', view).forEach((btn) => {
+    btn.addEventListener('click', () => pressKey(btn.dataset.key));
+  });
+  $$('[data-dir]', view).forEach((btn) => {
+    btn.addEventListener('click', () => {
+      state.draft.direction = btn.dataset.dir;
+      const first = state.categories.find((c) => c.direction === state.draft.direction);
+      state.draft.categoryId = first ? first.id : null;
       render();
-      window.scrollTo({ top: 0 });
+    });
+  });
+  $$('[data-cat]', view).forEach((btn) => {
+    btn.addEventListener('click', () => {
+      state.draft.categoryId = btn.dataset.cat;
+      render();
+    });
+  });
+  const noteInput = $('#draftNote', view);
+  if (noteInput) {
+    noteInput.addEventListener('input', () => {
+      state.draft.note = noteInput.value;
     });
   }
+  const dateInput = $('#draftDate', view);
+  if (dateInput) {
+    dateInput.addEventListener('change', () => {
+      state.draft.date = dateInput.value || todayStr();
+      render();
+    });
+  }
+  $$('[data-date-offset]', view).forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const d = new Date();
+      d.setDate(d.getDate() + Number(btn.dataset.dateOffset));
+      state.draft.date = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+      render();
+    });
+  });
+  const saveBtn = $('#saveEntry', view);
+  if (saveBtn) saveBtn.addEventListener('click', saveDraft);
 
-  $('#monthPrev').onclick = () => shiftMonth(-1);
-  $('#monthNext').onclick = () => shiftMonth(1);
-  $('#monthLabel').onclick = () => {
-    state.month = new Date().toISOString().slice(0, 7);
-    render();
-  };
-  $('#scopeToggle').onclick = () => {
-    state.scope = state.scope === 'me' ? 'all' : 'me';
-    localStorage.setItem('scope', state.scope);
-    render();
+  /* 明细 */
+  const search = $('#searchInput', view);
+  if (search) {
+    search.addEventListener('input', () => {
+      state.filters.keyword = search.value;
+      repaintList();
+    });
+  }
+  const fMember = $('#filterMember', view);
+  if (fMember) {
+    fMember.addEventListener('change', () => {
+      state.scope = fMember.value;
+      paintScope();
+      loadEntries();
+      loadStats();
+    });
+  }
+  const fDir = $('#filterDirection', view);
+  if (fDir) {
+    fDir.addEventListener('change', () => {
+      state.filters.direction = fDir.value;
+      repaintList();
+    });
+  }
+  const fCat = $('#filterCategory', view);
+  if (fCat) {
+    fCat.addEventListener('change', () => {
+      state.filters.category = fCat.value;
+      repaintList();
+    });
+  }
+  const clear = $('#clearFilters', view);
+  if (clear) {
+    clear.addEventListener('click', () => {
+      state.filters = { keyword: '', direction: 'all', category: 'all' };
+      render();
+    });
+  }
+  $$('[data-entry]', view).forEach((btn) => {
+    btn.addEventListener('click', () => openEntry(btn.dataset.entry));
+  });
+  $$('[data-jump]', view).forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const jump = btn.dataset.jump;
+      if (jump === 'stats') setView('stats');
+      else if (jump === 'expense' || jump === 'income') {
+        state.filters.direction = jump;
+        setView('list');
+      } else setView('list');
+    });
+  });
+  $$('[data-goto]', view).forEach((btn) => {
+    btn.addEventListener('click', () => setView(btn.dataset.goto));
+  });
+
+  /* 我的 */
+  $$('[data-scope]', view).forEach((btn) => {
+    btn.addEventListener('click', () => {
+      state.scope = btn.dataset.scope;
+      paintScope();
+      loadEntries();
+      loadStats();
+      render();
+    });
+  });
+  const gen = $('#genInvite', view);
+  if (gen) gen.addEventListener('click', generateInvite);
+  const codeEl = $('#inviteCode', view);
+  if (codeEl && state.invite) {
+    codeEl.addEventListener('click', () => copyInvite());
+  }
+  const join = $('#joinHousehold', view);
+  if (join) join.addEventListener('click', joinHousehold);
+  const logout = $('#logoutBtn', view);
+  if (logout) logout.addEventListener('click', doLogout);
+}
+
+/* 只重画列表区域，保住搜索框焦点 */
+function repaintList() {
+  const view = $('#view');
+  const active = document.activeElement;
+  const isSearch = active && active.id === 'searchInput';
+  const caret = isSearch ? active.selectionStart : null;
+  view.innerHTML = renderList();
+  bindView();
+  if (isSearch) {
+    const s = $('#searchInput');
+    s.focus();
+    if (caret != null) s.setSelectionRange(caret, caret);
+  }
+}
+
+/* ------------------------------------------------------------ 数字键盘 */
+
+function pressKey(key) {
+  const d = state.draft;
+  if (key === 'del') {
+    d.cents = Math.floor(d.cents / 10);
+  } else if (key === '00') {
+    if (d.cents > 0 && d.cents < 10000000) d.cents = d.cents * 100;
+  } else {
+    if (d.cents >= 10000000) return;
+    d.cents = d.cents * 10 + Number(key);
+  }
+  const val = $('.amount__value');
+  const note = $('#saveNote');
+  if (val) {
+    val.textContent = fmtMoney(d.cents, { symbol: false });
+    val.classList.toggle('is-zero', !d.cents);
+  }
+  const canSave = d.cents > 0 && d.categoryId && !state.saving;
+  const btn = $('#saveEntry');
+  if (btn) btn.disabled = !canSave;
+  if (note) note.textContent = !d.cents ? '先按上面的数字键输入金额' : !d.categoryId ? '选一个分类才能保存' : saveHint();
+}
+
+/* -------------------------------------------------------------- 保存一笔 */
+
+async function saveDraft() {
+  if (state.saving) return;
+  const d = state.draft;
+  if (!d.cents) {
+    toast('先输入金额');
+    return;
+  }
+  if (!d.categoryId) {
+    toast('选一个分类');
+    return;
+  }
+
+  state.saving = true;
+  const btn = $('#saveEntry');
+  if (btn) {
+    btn.classList.add('is-loading');
+    btn.disabled = true;
+  }
+
+  const payload = {
+    amountCents: d.cents,
+    direction: d.direction,
+    categoryId: String(d.categoryId),
+    note: d.note.trim(),
+    occurredOn: d.date,
+    clientUuid: crypto.randomUUID(),
   };
 
-  // 实体键盘：数字直接输入、退格删除、回车保存
-  window.addEventListener('keydown', (e) => {
-    if (!$('#modal').hidden && e.key === 'Escape') {
-      closeModal();
+  try {
+    const data = await api('POST', '/api/entries', payload);
+    const entry = data.entry || {};
+    const sign = d.direction === 'income' ? '+' : '−';
+    const label = `${sign}${fmtMoney(payload.amountCents)}`;
+    state.draft.cents = 0;
+    state.draft.note = '';
+    state.saving = false;
+    render();
+    loadEntries();
+    loadStats();
+    toast(`已记 ${label}`, entry.id
+      ? {
+          label: '撤销',
+          run: async () => {
+            try {
+              await api('DELETE', `/api/entries/${entry.id}`);
+              loadEntries();
+              loadStats();
+              toast('已撤销');
+            } catch {
+              toast('撤销失败，去明细里删');
+            }
+          },
+        }
+      : null);
+  } catch (err) {
+    state.saving = false;
+    if (looksOffline(err)) {
+      const queue = readOutbox();
+      queue.push(payload);
+      writeOutbox(queue);
+      state.draft.cents = 0;
+      state.draft.note = '';
+      render();
+      toast('网络不通，已先存在这台设备上，联网后自动上传');
+    } else {
+      render();
+      toast(err.message || '保存失败，再试一次');
+    }
+  }
+}
+
+/* ------------------------------------------------------------ 离线补传 */
+
+let flushing = false;
+async function flushOutbox() {
+  if (flushing) return;
+  const queue = readOutbox();
+  if (!queue.length) return;
+  flushing = true;
+  const rest = [];
+  let done = 0;
+  for (const item of queue) {
+    try {
+      await api('POST', '/api/entries', item);
+      done += 1;
+    } catch (err) {
+      if (err.status === 409) done += 1;
+      else rest.push(item);
+    }
+  }
+  writeOutbox(rest);
+  flushing = false;
+  if (done) {
+    toast(`离线攒的 ${done} 笔已同步`);
+    loadEntries();
+    loadStats();
+  }
+}
+
+window.addEventListener('online', flushOutbox);
+
+/* -------------------------------------------------------------- 条目弹层 */
+
+function openEntry(id) {
+  const e = state.entries.find((x) => String(x.id) === String(id));
+  if (!e) return;
+  const sign = e.direction === 'income' ? '+' : '−';
+  openModal(`
+    <div class="modal__title">${escapeAttr(e.note || e.category_name)}</div>
+    <div class="modal__amount">${sign}${fmtMoney(e.amount_cents)}</div>
+    <div class="modal__meta">${catIcon(e.category_name)}<span>${e.category_name} · ${e.occurred_on} · ${escapeAttr(e.author_name || '')}</span></div>
+
+    <div class="modal__actions">
+      <button type="button" class="btn btn--danger" data-act="delete">删除</button>
+      <button type="button" class="btn btn--ghost" data-act="edit">改一下</button>
+    </div>
+    <div class="modal__actions" style="margin-top:8px">
+      <button type="button" class="btn btn--primary" data-act="close">好</button>
+    </div>
+  `);
+
+  const modal = $('#modal');
+  $('[data-act="close"]', modal).addEventListener('click', closeModal);
+  $('[data-act="edit"]', modal).addEventListener('click', () => openEdit(e));
+  $('[data-act="delete"]', modal).addEventListener('click', () => confirmDelete(e));
+}
+
+function openEdit(e) {
+  const cats = state.categories.map(
+    (c) => `<option value="${c.id}" ${String(c.id) === String(e.category_id) ? 'selected' : ''}>${c.name}</option>`,
+  );
+  openModal(`
+    <div class="modal__title">改一下</div>
+    <div class="modal__field">
+      <label class="modal__label">金额</label>
+      <input class="input" id="editAmount" inputmode="decimal" value="${(e.amount_cents / 100).toFixed(2)}" />
+    </div>
+    <div class="modal__field">
+      <label class="modal__label">备注</label>
+      <input class="input" id="editNote" maxlength="40" value="${escapeAttr(e.note || '')}" placeholder="写点什么" />
+    </div>
+    <div class="modal__field">
+      <label class="modal__label">分类</label>
+      <select class="select" id="editCategory">${cats.join('')}</select>
+    </div>
+    <div class="modal__field">
+      <label class="modal__label">日期</label>
+      <input class="input" id="editDate" type="date" value="${e.occurred_on}" />
+    </div>
+    <div class="modal__actions">
+      <button type="button" class="btn btn--ghost" data-act="cancel">取消</button>
+      <button type="button" class="btn btn--primary" data-act="save">保存</button>
+    </div>
+  `);
+
+  const modal = $('#modal');
+  $('[data-act="cancel"]', modal).addEventListener('click', closeModal);
+  $('[data-act="save"]', modal).addEventListener('click', async (ev) => {
+    const btn = ev.currentTarget;
+    const amount = Math.round(Number($('#editAmount', modal).value.replace(/[^\d.]/g, '')) * 100);
+    if (!amount || amount < 0) {
+      toast('金额要大于 0');
       return;
     }
-    if (state.view !== 'add' || !$('#appScreen') || $('#appScreen').hidden) return;
-    if ($('#modal').hidden === false) return;
-    const tag = document.activeElement?.tagName;
-    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-
-    if (/^[0-9]$/.test(e.key)) {
-      e.preventDefault();
-      state.draft.digits = (state.draft.digits + e.key).slice(0, 9);
-      render();
-    } else if (e.key === 'Backspace') {
-      e.preventDefault();
-      state.draft.digits = state.draft.digits.slice(0, -1);
-      render();
-    } else if (e.key === 'Enter') {
-      e.preventDefault();
-      saveEntry();
+    btn.classList.add('is-loading');
+    btn.disabled = true;
+    try {
+      await api('PATCH', `/api/entries/${e.id}`, {
+        amountCents: amount,
+        note: $('#editNote', modal).value.trim(),
+        categoryId: $('#editCategory', modal).value,
+        occurredOn: $('#editDate', modal).value,
+      });
+      closeModal();
+      toast('改好了');
+      loadEntries();
+      loadStats();
+    } catch (err) {
+      btn.classList.remove('is-loading');
+      btn.disabled = false;
+      toast(looksOffline(err) ? '网络不通，改不了，先放一放' : err.message || '改不动，再试一次');
     }
   });
 }
 
-bind();
-boot().then(() => flushOutbox());
+function confirmDelete(e) {
+  openModal(`
+    <div class="modal__title">删掉这笔？</div>
+    <div class="modal__amount">${e.direction === 'income' ? '+' : '−'}${fmtMoney(e.amount_cents)}</div>
+    <div class="modal__meta"><span>${e.category_name} · ${e.occurred_on}</span></div>
+    <p class="muted" style="margin-top:10px">删掉后可以从这里撤销。</p>
+    <div class="modal__actions">
+      <button type="button" class="btn btn--ghost" data-act="cancel">取消</button>
+      <button type="button" class="btn btn--danger" data-act="ok">删除</button>
+    </div>
+  `);
+  const modal = $('#modal');
+  $('[data-act="cancel"]', modal).addEventListener('click', closeModal);
+  $('[data-act="ok"]', modal).addEventListener('click', async (ev) => {
+    const btn = ev.currentTarget;
+    btn.classList.add('is-loading');
+    btn.disabled = true;
+    try {
+      await api('DELETE', `/api/entries/${e.id}`);
+      closeModal();
+      loadEntries();
+      loadStats();
+      toast('已删除', {
+        label: '撤销',
+        run: async () => {
+          try {
+            await api('POST', `/api/entries/${e.id}/restore`);
+            loadEntries();
+            loadStats();
+            toast('已恢复');
+          } catch {
+            toast('恢复失败');
+          }
+        },
+      });
+    } catch (err) {
+      btn.classList.remove('is-loading');
+      btn.disabled = false;
+      toast(looksOffline(err) ? '网络不通，删不掉' : err.message || '删除失败');
+    }
+  });
+}
 
-// 联网就自动补传离线记账
-window.addEventListener('online', () => flushOutbox());
+/* -------------------------------------------------------------- 家庭管理 */
 
-// PWA：注册 service worker（离线可用）
+async function generateInvite() {
+  const btn = $('#genInvite');
+  if (btn) {
+    btn.classList.add('is-loading');
+    btn.disabled = true;
+  }
+  try {
+    const data = await api('POST', '/api/household/invite', {});
+    state.invite = { code: data.code, expiresAt: data.expiresAt, left: data.ttlSeconds || 600, copied: false };
+    render();
+    startInviteTimer();
+  } catch (err) {
+    if (btn) {
+      btn.classList.remove('is-loading');
+      btn.disabled = false;
+    }
+    toast(err.message || '生成失败，再试一次');
+  }
+}
+
+function startInviteTimer() {
+  clearInterval(state.inviteTimer);
+  state.inviteTimer = setInterval(() => {
+    if (!state.invite) return clearInterval(state.inviteTimer);
+    state.invite.left -= 1;
+    if (state.invite.left <= 0) {
+      clearInterval(state.inviteTimer);
+      state.invite = null;
+      if (state.view === 'me') render();
+      return;
+    }
+    const hint = $('#inviteHint');
+    if (hint) hint.textContent = `还剩 ${state.invite.left} 秒失效${state.invite.copied ? ' · 已复制' : ' · 点数字可复制'}`;
+  }, 1000);
+}
+
+async function copyInvite() {
+  if (!state.invite) return;
+  try {
+    await navigator.clipboard.writeText(state.invite.code);
+    state.invite.copied = true;
+    const hint = $('#inviteHint');
+    if (hint) hint.textContent = `还剩 ${state.invite.left} 秒失效 · 已复制`;
+    toast('邀请码已复制');
+  } catch {
+    toast(`邀请码：${state.invite.code}`);
+  }
+}
+
+async function joinHousehold() {
+  const input = $('#joinCode');
+  const code = (input?.value || '').trim().toUpperCase();
+  if (code.length !== 6) {
+    toast('邀请码是 6 位');
+    return;
+  }
+  const btn = $('#joinHousehold');
+  if (btn) {
+    btn.classList.add('is-loading');
+    btn.disabled = true;
+  }
+  try {
+    await api('POST', '/api/household/join', { code });
+    toast('加入成功');
+    await boot();
+    setView('list');
+  } catch (err) {
+    if (btn) {
+      btn.classList.remove('is-loading');
+      btn.disabled = false;
+    }
+    toast(err.message || '邀请码不对或已过期');
+  }
+}
+
+async function doLogout() {
+  try {
+    await api('POST', '/api/auth/logout', {});
+  } catch {
+    /* 离线也要能退出 */
+  }
+  state.me = null;
+  state.entries = [];
+  state.stats = null;
+  state.invite = null;
+  clearInterval(state.inviteTimer);
+  showAuth();
+}
+
+/* ------------------------------------------------------------ 实体键盘 */
+
+document.addEventListener('keydown', (e) => {
+  if (!state.me || state.view !== 'add') return;
+  const tag = (e.target.tagName || '').toLowerCase();
+  const typing = tag === 'input' || tag === 'textarea' || tag === 'select';
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+  if (/^[0-9]$/.test(e.key) && !typing) {
+    pressKey(e.key);
+    e.preventDefault();
+  } else if (e.key === 'Backspace' && !typing) {
+    pressKey('del');
+    e.preventDefault();
+  } else if (e.key === 'Enter' && !typing) {
+    const btn = $('#saveEntry');
+    if (btn && !btn.disabled) saveDraft();
+    e.preventDefault();
+  }
+});
+
+/* --------------------------------------------------------------- Service Worker */
+
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js').catch(() => {});
   });
 }
+
+/* ------------------------------------------------------------------ 入口 */
+
+onUnauthorized = () => showAuth();
+
+setAuthMode('login');
+boot();

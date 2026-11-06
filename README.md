@@ -7,10 +7,11 @@ A tiny web ledger for couples and families: **each person records their own spen
 Open it, hit digits, done in about three seconds. Works offline; queued entries upload themselves later.
 
 <p align="center">
-  <img src="docs/screenshots/login.png" width="200" alt="登录 / sign in" />
-  <img src="docs/screenshots/add.png" width="240" alt="记一笔 / add an entry" />
-  <img src="docs/screenshots/list.png" width="240" alt="明细 / entries" />
-  <img src="docs/screenshots/stats.png" width="240" alt="统计 / stats" />
+  <img src="docs/screenshots/login.png" width="184" alt="登录 / sign in" />
+  <img src="docs/screenshots/add.png" width="184" alt="记一笔 / add an entry" />
+  <img src="docs/screenshots/list.png" width="184" alt="明细 / entries" />
+  <img src="docs/screenshots/stats.png" width="184" alt="统计 / stats" />
+  <img src="docs/screenshots/me.png" width="184" alt="我的与家庭 / household" />
 </p>
 
 ---
